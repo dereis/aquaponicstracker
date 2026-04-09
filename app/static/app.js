@@ -89,7 +89,8 @@ function switchTab(name) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
 
-  document.querySelector(`[data-tab="${name}"]`).classList.add('active');
+  const tabBtn = document.querySelector(`[data-tab="${name}"]`);
+  if (tabBtn) tabBtn.classList.add('active');
   document.getElementById(`tab-${name}`).classList.add('active');
   currentTab = name;
 
