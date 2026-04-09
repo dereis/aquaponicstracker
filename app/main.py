@@ -773,7 +773,9 @@ Rules:
   explicitly (e.g. "Magnesium was low on Apr 3 — today's deficiency symptoms are consistent with that lag")
 - Flag parameters trending toward a problem range even if not yet critical
 - Keep it to 3–5 bullet points, each concrete and data-driven
-- If there are fewer than 3 entries or no meaningful correlations, say so briefly in one sentence
+- If there is only one entry or very little data, note this briefly, then still analyse what you can: \
+  interpret the plant notes for likely causes, assess whether the logged parameters suggest any issues, \
+  and flag anything worth watching. Do not refuse to analyse just because there is limited history.
 - Do not give general aquaponics advice — only observations grounded in this grower's actual data
 - **Every bullet point MUST end with an inline citation** from the knowledge base to support the \
   domain claim being made. Format: **[Source Name]**: *"short direct quote"* or **[Book Title, p. N]**: \
@@ -831,7 +833,7 @@ async def get_insights(generate: bool = True):
         return {"insights": None, "updated_at": None}
 
     entries = get_all_entries(30)
-    if len(entries) < 3:
+    if not entries:
         return {"insights": None, "updated_at": None}
 
     current_hash = _get_data_hash()

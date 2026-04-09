@@ -21,8 +21,6 @@
       </div>
       <nav class="tab-nav">
         <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
-        <button class="tab-btn" data-tab="track">Log Entry</button>
-        <button class="tab-btn" data-tab="ai">AI Advisor</button>
         <button class="tab-btn" data-tab="history">History</button>
         <button class="tab-btn" data-tab="learnings">Learnings</button>
       </nav>
@@ -65,6 +63,33 @@
           <div class="insights-cta" id="insights-cta">
             <p>Analyze your tracking history for correlations between past parameter changes and current symptoms.</p>
             <button class="btn btn-primary" onclick="generateInsights()">Generate Insights</button>
+          </div>
+        </div>
+
+        <!-- Ask a question -->
+        <div class="ask-question-section" id="ask-question-section" style="display:none">
+          <div class="ask-question-divider">Ask a question</div>
+
+          <!-- Mode toggle -->
+          <div class="ai-mode-toggle">
+            <button class="mode-btn active" data-mode="diagnose">🔍 Diagnose</button>
+            <button class="mode-btn" data-mode="recommend">💡 Recommend</button>
+          </div>
+
+          <div class="ask-question-input">
+            <textarea id="ai-query" rows="3"
+              placeholder="Describe symptoms or ask a question about your system..."></textarea>
+            <div class="ai-actions">
+              <button class="btn btn-primary" id="ai-submit-btn" onclick="submitAIQuery()">Get Analysis</button>
+              <div class="ai-loading" id="ai-loading" style="display:none">
+                <div class="spinner"></div>
+                <span>Consulting specialists...</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="card ai-response-card" id="ai-response-card" style="display:none">
+            <div class="response-body" id="ai-response-body"></div>
           </div>
         </div>
       </div>
@@ -187,51 +212,6 @@
       </form>
     </section>
 
-    <!-- ===== AI ADVISOR TAB ===== -->
-    <section class="tab-panel" id="tab-ai">
-      <div class="section-header">
-        <h2>AI Advisor</h2>
-        <p class="section-desc">Describe what you're observing and get expert analysis backed by your aquaponics knowledge base.</p>
-      </div>
-
-      <!-- Mode toggle -->
-      <div class="ai-mode-toggle">
-        <button class="mode-btn active" data-mode="diagnose">
-          🔍 Symptom Diagnosis
-        </button>
-        <button class="mode-btn" data-mode="recommend">
-          💡 General Recommendation
-        </button>
-      </div>
-
-      <!-- Input area -->
-      <div class="card ai-input-card">
-        <label for="ai-query" id="ai-query-label" class="ai-query-label">
-          Describe the symptoms you're observing:
-        </label>
-        <textarea id="ai-query" rows="5"
-          placeholder="Examples:&#10;• My lettuce has yellowing on the older lower leaves that started 3 days ago&#10;• My tomato plants have brown tips on the leaf edges&#10;• The newer leaves on my basil look pale yellow between the veins&#10;• My fish seem lethargic and are gasping near the surface"></textarea>
-
-        <div class="ai-actions">
-          <button class="btn btn-primary" id="ai-submit-btn" onclick="submitAIQuery()">
-            Get Analysis
-          </button>
-          <div class="ai-loading" id="ai-loading" style="display:none">
-            <div class="spinner"></div>
-            <span>Consulting specialists...</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- AI response -->
-      <div class="card ai-response-card" id="ai-response-card" style="display:none">
-        <div class="response-header">
-          <span class="response-specialist" id="response-specialist-label"></span>
-          <span class="cache-badge" id="cache-badge" style="display:none">⚡ cached</span>
-        </div>
-        <div class="response-body" id="ai-response-body"></div>
-      </div>
-    </section>
 
     <!-- ===== HISTORY TAB ===== -->
     <section class="tab-panel" id="tab-history">

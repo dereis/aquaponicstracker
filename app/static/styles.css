@@ -783,6 +783,75 @@ body {
   margin-left: auto;
 }
 
+/* ── Ask a question ──────────────────────────────────────── */
+.ask-question-section {
+  margin-top: 1.5rem;
+  border-top: 1px solid var(--slate-200);
+  padding-top: 1.25rem;
+}
+
+.ask-question-divider {
+  font-size: .75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--slate-400);
+  margin-bottom: 1rem;
+}
+
+.ask-question-input {
+  display: flex;
+  flex-direction: column;
+  gap: .75rem;
+  margin-top: .75rem;
+}
+
+.ask-question-input textarea {
+  width: 100%;
+  border: 1px solid var(--slate-300);
+  border-radius: var(--radius);
+  padding: .6rem .8rem;
+  font-size: .9rem;
+  resize: vertical;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.ask-question-input textarea:focus {
+  outline: none;
+  border-color: var(--green-500);
+}
+
+/* ── Footnote-style citations ────────────────────────────── */
+.response-body strong a,
+.insights-body strong a {
+  font-size: .78rem;
+  font-weight: 500;
+  color: var(--slate-400);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--slate-300);
+  vertical-align: super;
+  line-height: 0;
+}
+
+.response-body strong a:hover,
+.insights-body strong a:hover {
+  color: var(--green-600);
+  border-bottom-color: var(--green-500);
+}
+
+/* Citation blocks: **[Source]**: *"quote"* — de-emphasise */
+.response-body li > em,
+.insights-body li > em {
+  font-size: .8rem;
+  color: var(--slate-400);
+  font-style: italic;
+  display: block;
+  margin-top: .2rem;
+  padding-left: .75rem;
+  border-left: 2px solid var(--slate-200);
+}
+
 /* ── Learnings tab ───────────────────────────────────────── */
 .recorder-controls {
   display: flex;

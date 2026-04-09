@@ -197,12 +197,14 @@ function showInsightsResult(data) {
   const body    = document.getElementById('insights-body');
   const updated = document.getElementById('insights-updated');
   const regen   = document.getElementById('insights-regen-btn');
+  const askSection = document.getElementById('ask-question-section');
 
   body.innerHTML = `<div class="insights-body response-body">${marked.parse(data.insights)}</div>`;
   updated.textContent = data.updated_at
     ? `Updated ${new Date(data.updated_at).toLocaleDateString()}`
     : '';
   regen.style.display = '';
+  if (askSection) askSection.style.display = '';
 }
 
 function showInsightsCTA() {
@@ -213,6 +215,8 @@ function showInsightsCTA() {
     </div>`;
   document.getElementById('insights-updated').textContent = '';
   document.getElementById('insights-regen-btn').style.display = 'none';
+  const askSection = document.getElementById('ask-question-section');
+  if (askSection) askSection.style.display = 'none';
 }
 
 async function loadCachedInsights() {
@@ -414,15 +418,11 @@ document.querySelectorAll('.mode-btn').forEach(btn => {
     currentMode = btn.dataset.mode;
     document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
-
-    const label = document.getElementById('ai-query-label');
     const textarea = document.getElementById('ai-query');
-    if (currentMode === 'diagnose') {
-      label.textContent = 'Describe the symptoms you\'re observing:';
-      textarea.placeholder = 'Examples:\n• My lettuce has yellowing on the older lower leaves that started 3 days ago\n• My tomato plants have brown tips on the leaf edges\n• The newer leaves on my basil look pale yellow between the veins\n• My fish seem lethargic and are gasping near the surface';
-    } else {
-      label.textContent = 'Ask a question or leave blank for a general system review:';
-      textarea.placeholder = 'Examples:\n• What nutrients should I supplement this week?\n• My system has been running for 2 months — what should I check?\n• How can I improve plant growth rate?\n• (Leave blank for automatic review of your recent tracking data)';
+    if (textarea) {
+      textarea.placeholder = currentMode === 'diagnose'
+        ? 'Describe the symptoms you\'re observing...'
+        : 'Ask a question or leave blank for a general system review...';
     }
   });
 });
@@ -433,8 +433,6 @@ async function submitAIQuery() {
   const loading = document.getElementById('ai-loading');
   const responseCard = document.getElementById('ai-response-card');
   const responseBody = document.getElementById('ai-response-body');
-  const specialistLabel = document.getElementById('response-specialist-label');
-  const cacheBadge = document.getElementById('cache-badge');
 
   if (currentMode === 'diagnose' && !query) {
     document.getElementById('ai-query').focus();
@@ -459,16 +457,7 @@ async function submitAIQuery() {
 
     const data = await res.json();
 
-    specialistLabel.textContent = 'AI Panel';
     responseBody.innerHTML = marked.parse(data.response);
-
-    if (data.cached_tokens > 0) {
-      cacheBadge.style.display = 'inline';
-      cacheBadge.title = `${data.cached_tokens.toLocaleString()} tokens served from cache`;
-    } else {
-      cacheBadge.style.display = 'none';
-    }
-
     responseCard.style.display = 'block';
     responseCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
