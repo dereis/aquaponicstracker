@@ -100,12 +100,33 @@ function switchTab(name) {
   } else if (name === 'history') {
     loadHistory();
   } else if (name === 'learnings') {
-    loadLearnings();
+    // learnings loaded on demand when saved sub-tab is clicked
   }
 }
 
 document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+});
+
+function switchSubTab(name) {
+  // buttons
+  document.querySelectorAll('.sub-tab-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.subtab === name);
+  });
+  // panels — use inline style so there's no cascade conflict
+  document.querySelectorAll('.sub-tab-panel').forEach(p => {
+    p.style.display = p.id === `subtab-${name}` ? 'block' : 'none';
+  });
+  if (name === 'saved') loadLearnings();
+}
+
+document.querySelectorAll('.sub-tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => switchSubTab(btn.dataset.subtab));
+});
+
+// initialise panels on load
+document.querySelectorAll('.sub-tab-panel').forEach((p, i) => {
+  p.style.display = i === 0 ? 'block' : 'none';
 });
 
 // ── Dashboard ──────────────────────────────────────────────
@@ -582,15 +603,27 @@ async function saveEdit() {
   }
 }
 
+function showConfirm(message, onConfirm) {
+  const dialog = document.getElementById('confirm-dialog');
+  document.getElementById('confirm-message').textContent = message;
+  dialog.showModal();
+  const ok = document.getElementById('confirm-ok');
+  const cancel = document.getElementById('confirm-cancel');
+  const cleanup = () => { ok.replaceWith(ok.cloneNode(true)); cancel.replaceWith(cancel.cloneNode(true)); };
+  document.getElementById('confirm-ok').addEventListener('click', () => { dialog.close(); cleanup(); onConfirm(); }, { once: true });
+  document.getElementById('confirm-cancel').addEventListener('click', () => { dialog.close(); cleanup(); }, { once: true });
+}
+
 async function deleteEntry(id) {
-  if (!confirm('Delete this entry? This cannot be undone.')) return;
-  try {
-    const res = await fetch(`/api/entry/${id}`, { method: 'DELETE' });
-    if (!res.ok) throw new Error(await res.text());
-    loadHistory();
-  } catch (err) {
-    alert('Error: ' + err.message);
-  }
+  showConfirm('Delete this entry? This cannot be undone.', async () => {
+    try {
+      const res = await fetch(`/api/entry/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(await res.text());
+      loadHistory();
+    } catch (err) {
+      alert('Error: ' + err.message);
+    }
+  });
 }
 
 // ── Deep-link: navigate to #learning-N ──────────────────────
@@ -711,7 +744,7 @@ async function saveLearning() {
     });
     if (!res.ok) throw new Error(await res.text());
     clearLearningForm();
-    loadLearnings();
+    switchSubTab('saved');
   } catch (err) {
     document.getElementById('recorder-hint').textContent = 'Error: ' + err.message;
   } finally {
@@ -801,14 +834,15 @@ async function saveLearningEdit(id) {
 }
 
 async function deleteLearning(id) {
-  if (!confirm('Delete this learning? This cannot be undone.')) return;
-  try {
-    const res = await fetch(`/api/learnings/${id}`, { method: 'DELETE' });
-    if (!res.ok) throw new Error(await res.text());
-    loadLearnings();
-  } catch (err) {
-    alert('Error: ' + err.message);
-  }
+  showConfirm('Delete this learning? This cannot be undone.', async () => {
+    try {
+      const res = await fetch(`/api/learnings/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(await res.text());
+      loadLearnings();
+    } catch (err) {
+      alert('Error: ' + err.message);
+    }
+  });
 }
 
 // ── Init ────────────────────────────────────────────────────

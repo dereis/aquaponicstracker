@@ -255,49 +255,56 @@
     </section>
 
     <!-- ===== LEARNINGS TAB ===== -->
+    <!-- ===== LEARNINGS TAB ===== -->
     <section class="tab-panel" id="tab-learnings">
       <div class="section-header">
         <h2>Learnings</h2>
-        <p class="section-desc" style="width:100%;margin-top:.25rem">Record yourself and your notes will be automatically transcribed and saved.</p>
       </div>
 
-      <div class="card">
-        <div class="card-header">
-          <span class="card-icon">🎙</span>
-          <h3>New Recording</h3>
+      <div class="sub-tab-nav">
+        <button class="sub-tab-btn active" data-subtab="new-recording">New Recording</button>
+        <button class="sub-tab-btn" data-subtab="saved">Saved Learnings</button>
+      </div>
+
+      <div class="sub-tab-panel" id="subtab-new-recording">
+        <div class="card">
           <div class="recording-indicator" id="recording-indicator" style="display:none">
             <span class="rec-dot"></span><span>Recording…</span>
           </div>
-        </div>
-
-        <div class="form-group" style="margin-bottom:1rem">
-          <label for="learning-title">Title <span style="font-weight:400;color:var(--slate-400)">(optional)</span></label>
-          <input type="text" id="learning-title" placeholder="e.g. Iron deficiency observations" />
-        </div>
-
-        <div class="recorder-controls">
-          <button class="btn btn-primary" id="record-btn" onclick="toggleRecording()">🎙 Start Recording</button>
-          <span class="recorder-hint" id="recorder-hint"></span>
-        </div>
-
-        <div class="form-group" style="margin-top:1rem">
-          <label for="learning-content">Transcript <span style="font-weight:400;color:var(--slate-400)">(auto-filled · editable)</span></label>
-          <textarea id="learning-content" rows="6" placeholder="Press Start Recording and speak. The transcript will appear here automatically. You can also type directly."></textarea>
-        </div>
-
-        <div class="form-actions">
-          <button class="btn btn-primary" id="save-learning-btn" onclick="saveLearning()">Save Learning</button>
-          <button class="btn btn-secondary" onclick="clearLearningForm()">Clear</button>
+          <div class="form-group" style="margin-bottom:1rem">
+            <label for="learning-title">Title <span style="font-weight:400;color:var(--slate-400)">(optional)</span></label>
+            <input type="text" id="learning-title" placeholder="e.g. Iron deficiency observations" />
+          </div>
+          <div class="recorder-controls">
+            <button class="btn btn-primary" id="record-btn" onclick="toggleRecording()">🎙 Start Recording</button>
+            <span class="recorder-hint" id="recorder-hint"></span>
+          </div>
+          <div class="form-group" style="margin-top:1rem">
+            <label for="learning-content">Transcript <span style="font-weight:400;color:var(--slate-400)">(auto-filled · editable)</span></label>
+            <textarea id="learning-content" rows="6" placeholder="Press Start Recording and speak. The transcript will appear here automatically. You can also type directly."></textarea>
+          </div>
+          <div class="form-actions">
+            <button class="btn btn-primary" id="save-learning-btn" onclick="saveLearning()">Save Learning</button>
+            <button class="btn btn-secondary" onclick="clearLearningForm()">Clear</button>
+          </div>
         </div>
       </div>
 
-      <div class="section-header mt-4">
-        <h3 style="font-size:1.1rem;font-weight:700;color:var(--slate-900)">Saved Learnings</h3>
+      <div class="sub-tab-panel" id="subtab-saved">
+        <div id="learnings-list"></div>
       </div>
-      <div id="learnings-list"></div>
     </section>
 
   </main>
+
+  <!-- Confirm Dialog -->
+  <dialog id="confirm-dialog" class="confirm-dialog">
+    <p class="confirm-message" id="confirm-message"></p>
+    <div class="confirm-actions">
+      <button class="btn btn-secondary" id="confirm-cancel">Cancel</button>
+      <button class="btn btn-danger" id="confirm-ok">Delete</button>
+    </div>
+  </dialog>
 
   <!-- Edit Entry Modal -->
   <dialog id="edit-modal" class="edit-modal">

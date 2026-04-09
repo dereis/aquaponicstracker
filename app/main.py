@@ -277,8 +277,14 @@ The two exceptions are **lettuce** and **kale**, which are grown as full-size pl
 
 Whenever your response draws on the knowledge base provided, you **must** cite the source inline. Use the following formats:
 
-- For curated guides (Aquaponics System Guide, Nutrient Deficiencies, Plant Symptoms, Water Chemistry): cite as **[Source Name]** immediately after the claim, and include a short direct quote where possible.
-  Example: Iron becomes unavailable above pH 7.5 **[Water Chemistry]**: *"Fe, Mn, Zn nearly unavailable above pH 7.5."*
+- For curated guides, cite using this exact format at the end of the sentence — no bold, no square brackets:
+  `Source: [Water Chemistry](/knowledge/water-chemistry.md). *"short direct quote."*`
+  Available sources and their links:
+  - Water Chemistry → `/knowledge/water-chemistry.md`
+  - Nutrient Deficiencies → `/knowledge/nutrient-deficiencies.md`
+  - Plant Symptoms → `/knowledge/plant-symptoms.md`
+  - Aquaponics System Guide → `/knowledge/aquaponics-system-guide.md`
+  Example: Iron becomes unavailable above pH 7.5. Source: [Water Chemistry](/knowledge/water-chemistry.md). *"Fe, Mn, Zn nearly unavailable above pH 7.5."*
 
 - For PDF/reference sources (shown as `[Book Title, page N]` in the knowledge base): cite the title and page number.
   Example: **[The Aquaponic Farmer, p. 42]**: *"Quoted passage."*
@@ -778,9 +784,13 @@ Rules:
   and flag anything worth watching. Do not refuse to analyse just because there is limited history.
 - Do not give general aquaponics advice — only observations grounded in this grower's actual data
 - **Every bullet point MUST end with an inline citation** from the knowledge base to support the \
-  domain claim being made. Format: **[Source Name]**: *"short direct quote"* or **[Book Title, p. N]**: \
-  *"quote"*. If a bullet contains no citable domain knowledge (e.g. it is a pure data observation), \
-  note "(data only — no knowledge base reference needed)" at the end. No uncited domain claims are permitted.\
+  domain claim being made. Use this exact format — no bold, no square brackets around the source name: \
+  `Source: [Source Name](/knowledge/filename.md). *"short direct quote."*` \
+  Available links: [Water Chemistry](/knowledge/water-chemistry.md), \
+  [Nutrient Deficiencies](/knowledge/nutrient-deficiencies.md), \
+  [Plant Symptoms](/knowledge/plant-symptoms.md), \
+  [Aquaponics System Guide](/knowledge/aquaponics-system-guide.md). \
+  If a bullet contains no citable domain knowledge, note "(data only)" at the end instead.\
 """
 
 
@@ -850,6 +860,7 @@ async def get_insights(generate: bool = True):
 # ---------------------------------------------------------------------------
 
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
+app.mount("/knowledge", StaticFiles(directory=KNOWLEDGE_DIR), name="knowledge")
 
 
 @app.get("/")
