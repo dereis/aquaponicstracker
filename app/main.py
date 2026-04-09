@@ -1,26 +1,19 @@
 """
 Aquaponics Nutrient Tracker — FastAPI Backend
-
-Routes:
-  GET  /                   Serve the frontend
-  POST /api/track          Save a daily tracking entry
-  GET  /api/history        Get tracking history (query: ?days=30)
-  GET  /api/latest         Get the most recent entry
-  POST /api/diagnose       AI symptom diagnosis
-  POST /api/recommend      AI general recommendation
-  GET  /api/specialists    List available AI specialists
 """
 
 import asyncio
 import json
 import os
 import re
-import sqlite3
-from datetime import datetime
+from contextlib import contextmanager
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
 import anthropic
+import psycopg2
+import psycopg2.extras
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
@@ -36,9 +29,7 @@ load_dotenv()
 BASE_DIR = Path(__file__).parent
 KNOWLEDGE_DIR = BASE_DIR.parent / "knowledge"
 AGENTS_DIR = BASE_DIR.parent / "agents"
-DB_PATH = BASE_DIR / "aquaponics.db"
 
-# User's JSONL knowledge directory (optional — enables enhanced keyword search)
 _user_knowledge_env = os.getenv("USER_KNOWLEDGE_DIR", "").strip()
 USER_JSONL_DIR = Path(_user_knowledge_env) if _user_knowledge_env else None
 
@@ -46,85 +37,108 @@ USER_JSONL_DIR = Path(_user_knowledge_env) if _user_knowledge_env else None
 # Database
 # ---------------------------------------------------------------------------
 
-def init_db() -> None:
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS tracking_entries (
-                id                INTEGER PRIMARY KEY AUTOINCREMENT,
-                date              TEXT NOT NULL,
-                ph                REAL,
-                ammonia           REAL,
-                nitrite           REAL,
-                nitrate           REAL,
-                dissolved_oxygen  REAL,
-                temperature       REAL,
-                potassium         REAL,
-                calcium           REAL,
-                magnesium         REAL,
-                iron              REAL,
-                plant_notes       TEXT,
-                created_at        TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS learnings (
-                id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                title      TEXT,
-                content    TEXT NOT NULL,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS ai_insights (
-                id           INTEGER PRIMARY KEY CHECK (id = 1),
-                content      TEXT,
-                generated_at TEXT,
-                data_hash    TEXT
-            )
-        """)
+@contextmanager
+def get_db():
+    """Context manager that yields a psycopg2 connection and handles commit/rollback/close."""
+    url = os.getenv("DATABASE_URL")
+    if not url:
+        raise RuntimeError("DATABASE_URL environment variable is not set")
+    conn = psycopg2.connect(url, cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        yield conn
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def init_db() -> None:
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS tracking_entries (
+                    id               SERIAL PRIMARY KEY,
+                    date             TEXT NOT NULL,
+                    ph               REAL,
+                    ammonia          REAL,
+                    nitrite          REAL,
+                    nitrate          REAL,
+                    dissolved_oxygen REAL,
+                    temperature      REAL,
+                    potassium        REAL,
+                    calcium          REAL,
+                    magnesium        REAL,
+                    iron             REAL,
+                    plant_notes      TEXT,
+                    created_at       TEXT DEFAULT TO_CHAR(NOW(), 'YYYY-MM-DD HH24:MI:SS')
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS learnings (
+                    id         SERIAL PRIMARY KEY,
+                    title      TEXT,
+                    content    TEXT NOT NULL,
+                    created_at TEXT DEFAULT TO_CHAR(NOW(), 'YYYY-MM-DD HH24:MI:SS')
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS ai_insights (
+                    id           INTEGER PRIMARY KEY CHECK (id = 1),
+                    content      TEXT,
+                    generated_at TEXT,
+                    data_hash    TEXT
+                )
+            """)
+
+
+def _date_cutoff(days: int) -> str:
+    return (date.today() - timedelta(days=days)).isoformat()
 
 
 def get_recent_entries(days: int = 14) -> list[dict]:
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.row_factory = sqlite3.Row
-        cur = conn.execute(
-            """SELECT t.* FROM tracking_entries t
-               INNER JOIN (
-                   SELECT date, MAX(id) AS max_id FROM tracking_entries
-                   WHERE date >= date('now', ?)
-                   GROUP BY date
-               ) latest ON t.id = latest.max_id
-               ORDER BY t.date DESC
-               LIMIT 60""",
-            (f"-{days} days",),
-        )
-        return [dict(row) for row in cur.fetchall()]
-
-
-def get_all_entries(days: int = 90) -> list[dict]:
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.row_factory = sqlite3.Row
-        if days == 0:
-            cur = conn.execute(
-                """SELECT t.* FROM tracking_entries t
-                   INNER JOIN (
-                       SELECT date, MAX(id) AS max_id FROM tracking_entries GROUP BY date
-                   ) latest ON t.id = latest.max_id
-                   ORDER BY t.date ASC"""
-            )
-        else:
-            cur = conn.execute(
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cutoff = _date_cutoff(days)
+            cur.execute(
                 """SELECT t.* FROM tracking_entries t
                    INNER JOIN (
                        SELECT date, MAX(id) AS max_id FROM tracking_entries
-                       WHERE date >= date('now', ?)
+                       WHERE date >= %s
                        GROUP BY date
                    ) latest ON t.id = latest.max_id
-                   ORDER BY t.date ASC""",
-                (f"-{days} days",),
+                   ORDER BY t.date DESC
+                   LIMIT 60""",
+                (cutoff,),
             )
-        return [dict(row) for row in cur.fetchall()]
+            return [dict(row) for row in cur.fetchall()]
+
+
+def get_all_entries(days: int = 90) -> list[dict]:
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            if days == 0:
+                cur.execute(
+                    """SELECT t.* FROM tracking_entries t
+                       INNER JOIN (
+                           SELECT date, MAX(id) AS max_id FROM tracking_entries GROUP BY date
+                       ) latest ON t.id = latest.max_id
+                       ORDER BY t.date ASC"""
+                )
+            else:
+                cutoff = _date_cutoff(days)
+                cur.execute(
+                    """SELECT t.* FROM tracking_entries t
+                       INNER JOIN (
+                           SELECT date, MAX(id) AS max_id FROM tracking_entries
+                           WHERE date >= %s
+                           GROUP BY date
+                       ) latest ON t.id = latest.max_id
+                       ORDER BY t.date ASC""",
+                    (cutoff,),
+                )
+            return [dict(row) for row in cur.fetchall()]
 
 
 # ---------------------------------------------------------------------------
@@ -132,7 +146,6 @@ def get_all_entries(days: int = 90) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def load_curated_knowledge() -> str:
-    """Load all curated markdown knowledge files."""
     parts: list[str] = []
     if KNOWLEDGE_DIR.exists():
         for path in sorted(KNOWLEDGE_DIR.glob("*.md")):
@@ -146,25 +159,18 @@ def load_curated_knowledge() -> str:
 
 
 def load_agent_prompt(agent_id: str) -> str:
-    """Load an agent definition file, stripping YAML frontmatter."""
     path = AGENTS_DIR / f"{agent_id}.md"
     if not path.exists():
         return ""
     content = path.read_text(encoding="utf-8")
-    # Strip YAML frontmatter (--- ... ---)
     content = re.sub(r"^---\n.*?\n---\n?", "", content, flags=re.DOTALL)
     return content.strip()
 
 
 def search_jsonl_knowledge(query: str, max_results: int = 8) -> str:
-    """
-    Keyword search over user's JSONL knowledge chunks.
-    Returns a formatted string of the most relevant passages, or empty string.
-    """
     if not USER_JSONL_DIR or not USER_JSONL_DIR.exists():
         return ""
 
-    # Build query terms (skip short/common words)
     stop_words = {"the", "and", "for", "are", "with", "that", "this", "have",
                   "from", "what", "when", "will", "can", "not", "but", "its"}
     query_terms = [
@@ -224,7 +230,6 @@ FIELD_LABELS = {
 
 
 def get_local_date() -> str:
-    """Return today's date in the server's local timezone (Eastern Time)."""
     return datetime.now().strftime("%Y-%m-%d")
 
 
@@ -307,11 +312,10 @@ The grower does not currently track micronutrients (boron, molybdenum, copper, z
 
 
 def load_learnings_knowledge() -> str:
-    """Load grower's personal learnings from the database as a knowledge section."""
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.row_factory = sqlite3.Row
-        cur = conn.execute("SELECT * FROM learnings ORDER BY created_at ASC")
-        learnings = [dict(r) for r in cur.fetchall()]
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM learnings ORDER BY created_at ASC")
+            learnings = [dict(r) for r in cur.fetchall()]
 
     if not learnings:
         return ""
@@ -323,9 +327,9 @@ def load_learnings_knowledge() -> str:
         "can navigate directly to the entry."
     ]
     for l in learnings:
-        date = l["created_at"][:10]
+        date_str = l["created_at"][:10]
         title = l["title"] or "Untitled"
-        parts.append(f"### [Grower Learning: {title}](#learning-{l['id']}) — {date}\n\n{l['content']}")
+        parts.append(f"### [Grower Learning: {title}](#learning-{l['id']}) — {date_str}\n\n{l['content']}")
 
     return "\n\n".join(parts)
 
@@ -352,7 +356,6 @@ def build_system_prompt(agent_id: str, extra_knowledge: str = "") -> str:
 
 
 def call_claude(system_content: str, user_message: str) -> tuple[str, int]:
-    """Call Claude with prompt caching on the system prompt. Returns (text, cache_read_tokens)."""
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
         raise HTTPException(500, detail="ANTHROPIC_API_KEY is not set in environment")
@@ -367,7 +370,7 @@ def call_claude(system_content: str, user_message: str) -> tuple[str, int]:
             {
                 "type": "text",
                 "text": system_content,
-                "cache_control": {"type": "ephemeral"},  # Cache the knowledge base
+                "cache_control": {"type": "ephemeral"},
             }
         ],
         messages=[{"role": "user", "content": user_message}],
@@ -431,7 +434,6 @@ class ConsultRequest(BaseModel):
 # API routes
 # ---------------------------------------------------------------------------
 
-
 NUMERIC_FIELDS = [
     "ph", "ammonia", "nitrite", "nitrate", "dissolved_oxygen",
     "temperature", "potassium", "calcium", "magnesium", "iron",
@@ -440,85 +442,75 @@ NUMERIC_FIELDS = [
 
 @app.post("/api/track")
 async def track_entry(entry: TrackingEntry):
-    """Save a daily tracking entry, merging with any existing entry for the same date.
-    New values override old ones; fields left blank keep their previous value."""
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.row_factory = sqlite3.Row
-        cur = conn.execute(
-            "SELECT * FROM tracking_entries WHERE date = ? ORDER BY id DESC LIMIT 1",
-            (entry.date,),
-        )
-        existing = cur.fetchone()
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT * FROM tracking_entries WHERE date = %s ORDER BY id DESC LIMIT 1",
+                (entry.date,),
+            )
+            existing = cur.fetchone()
 
-        if existing:
-            existing = dict(existing)
-            new = entry.model_dump()
-            merged = {
-                f: (new[f] if new[f] is not None else existing[f])
-                for f in NUMERIC_FIELDS
-            }
-            merged["plant_notes"] = (
-                entry.plant_notes if entry.plant_notes is not None else existing["plant_notes"]
-            )
-            conn.execute(
-                """UPDATE tracking_entries
-                   SET ph=?, ammonia=?, nitrite=?, nitrate=?, dissolved_oxygen=?,
-                       temperature=?, potassium=?, calcium=?, magnesium=?, iron=?,
-                       plant_notes=?, created_at=CURRENT_TIMESTAMP
-                   WHERE id=?""",
-                (
-                    merged["ph"], merged["ammonia"], merged["nitrite"], merged["nitrate"],
-                    merged["dissolved_oxygen"], merged["temperature"], merged["potassium"],
-                    merged["calcium"], merged["magnesium"], merged["iron"],
-                    merged["plant_notes"], existing["id"],
-                ),
-            )
-        else:
-            conn.execute(
-                """INSERT INTO tracking_entries
-                   (date, ph, ammonia, nitrite, nitrate, dissolved_oxygen, temperature,
-                    potassium, calcium, magnesium, iron, plant_notes)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    entry.date, entry.ph, entry.ammonia, entry.nitrite, entry.nitrate,
-                    entry.dissolved_oxygen, entry.temperature, entry.potassium,
-                    entry.calcium, entry.magnesium, entry.iron, entry.plant_notes,
-                ),
-            )
-        conn.commit()
+            if existing:
+                existing = dict(existing)
+                new = entry.model_dump()
+                merged = {
+                    f: (new[f] if new[f] is not None else existing[f])
+                    for f in NUMERIC_FIELDS
+                }
+                merged["plant_notes"] = (
+                    entry.plant_notes if entry.plant_notes is not None else existing["plant_notes"]
+                )
+                cur.execute(
+                    """UPDATE tracking_entries
+                       SET ph=%s, ammonia=%s, nitrite=%s, nitrate=%s, dissolved_oxygen=%s,
+                           temperature=%s, potassium=%s, calcium=%s, magnesium=%s, iron=%s,
+                           plant_notes=%s, created_at=TO_CHAR(NOW(), 'YYYY-MM-DD HH24:MI:SS')
+                       WHERE id=%s""",
+                    (
+                        merged["ph"], merged["ammonia"], merged["nitrite"], merged["nitrate"],
+                        merged["dissolved_oxygen"], merged["temperature"], merged["potassium"],
+                        merged["calcium"], merged["magnesium"], merged["iron"],
+                        merged["plant_notes"], existing["id"],
+                    ),
+                )
+            else:
+                cur.execute(
+                    """INSERT INTO tracking_entries
+                       (date, ph, ammonia, nitrite, nitrate, dissolved_oxygen, temperature,
+                        potassium, calcium, magnesium, iron, plant_notes)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                    (
+                        entry.date, entry.ph, entry.ammonia, entry.nitrite, entry.nitrate,
+                        entry.dissolved_oxygen, entry.temperature, entry.potassium,
+                        entry.calcium, entry.magnesium, entry.iron, entry.plant_notes,
+                    ),
+                )
     _clear_insights_cache()
     return {"status": "ok", "date": entry.date}
 
 
 @app.get("/api/history")
 async def get_history(days: int = 30):
-    """Return tracking history for chart rendering."""
     entries = get_all_entries(days)
     return {"entries": entries}
 
 
 @app.get("/api/latest")
 async def get_latest():
-    """Return the most recently logged entry."""
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.row_factory = sqlite3.Row
-        cur = conn.execute(
-            "SELECT * FROM tracking_entries ORDER BY date DESC, created_at DESC LIMIT 1"
-        )
-        row = cur.fetchone()
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT * FROM tracking_entries ORDER BY date DESC, created_at DESC LIMIT 1"
+            )
+            row = cur.fetchone()
     return {"entry": dict(row) if row else None}
 
 
 @app.post("/api/diagnose")
 async def diagnose(req: DiagnoseRequest):
-    """
-    AI symptom diagnosis.
-    Routes to the specified specialist (default: plant-biologist).
-    """
     recent = get_recent_entries(14)
     history_text = format_history_for_ai(recent)
     extra = search_jsonl_knowledge(req.symptoms)
-
     system_content = build_system_prompt(req.specialist, extra)
 
     user_message = f"""{history_text}
@@ -535,35 +527,25 @@ Please diagnose the most likely nutrient or system issue based on the symptoms a
 
 Structure your response as:
 1. **Most likely cause** — with specific nutrient or parameter and reasoning
-2. **Why** — explain the plant physiology or water chemistry principle (e.g., mobile vs. immobile nutrients, pH lockout)
+2. **Why** — explain the plant physiology or water chemistry principle
 3. **Alternative possibilities** — other diagnoses to rule out
 4. **Confirmation steps** — what to test or observe to confirm
 5. **Corrective actions** — specific steps in priority order, with products and approximate doses where relevant
 6. **Timeline** — when to expect improvement after intervention"""
 
     text, cache_tokens = call_claude(system_content, user_message)
-    return {
-        "response": text,
-        "specialist": req.specialist,
-        "cached_tokens": cache_tokens,
-    }
+    return {"response": text, "specialist": req.specialist, "cached_tokens": cache_tokens}
 
 
 @app.post("/api/recommend")
 async def recommend(req: RecommendRequest):
-    """
-    AI general recommendation based on recent tracking data.
-    Routes to the specified specialist (default: aquaponics-specialist).
-    """
     recent = get_recent_entries(14)
     history_text = format_history_for_ai(recent)
-
     question = req.question.strip() or (
         "Based on my recent tracking data, what are the most important issues "
         "I should address in my aquaponics system right now?"
     )
     extra = search_jsonl_knowledge(question)
-
     system_content = build_system_prompt(req.specialist, extra)
 
     user_message = f"""{history_text}
@@ -576,59 +558,55 @@ async def recommend(req: RecommendRequest):
 
 ---
 
-Please provide specific, actionable recommendations. Identify the most pressing issues first, explain the science behind your recommendations, and give concrete steps the grower can take. Where parameters are out of range, specify target values and how to achieve them."""
+Please provide specific, actionable recommendations. Identify the most pressing issues first, explain the science behind your recommendations, and give concrete steps the grower can take."""
 
     text, cache_tokens = call_claude(system_content, user_message)
-    return {
-        "response": text,
-        "specialist": req.specialist,
-        "cached_tokens": cache_tokens,
-    }
+    return {"response": text, "specialist": req.specialist, "cached_tokens": cache_tokens}
 
 
 @app.post("/api/learnings")
 async def save_learning(entry: LearningEntry):
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute(
-            "INSERT INTO learnings (title, content) VALUES (?, ?)",
-            (entry.title.strip() or None, entry.content),
-        )
-        conn.commit()
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO learnings (title, content) VALUES (%s, %s)",
+                (entry.title.strip() or None, entry.content),
+            )
     return {"status": "ok"}
 
 
 @app.get("/api/learnings")
 async def get_learnings():
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.row_factory = sqlite3.Row
-        cur = conn.execute("SELECT * FROM learnings ORDER BY created_at DESC")
-        return {"learnings": [dict(r) for r in cur.fetchall()]}
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM learnings ORDER BY created_at DESC")
+            return {"learnings": [dict(r) for r in cur.fetchall()]}
 
 
 @app.put("/api/learnings/{learning_id}")
 async def update_learning(learning_id: int, entry: LearningEntry):
-    with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.execute(
-            "UPDATE learnings SET title=?, content=? WHERE id=?",
-            (entry.title.strip() or None, entry.content, learning_id),
-        )
-        conn.commit()
-    if cur.rowcount == 0:
-        raise HTTPException(404, detail="Learning not found")
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE learnings SET title=%s, content=%s WHERE id=%s",
+                (entry.title.strip() or None, entry.content, learning_id),
+            )
+            if cur.rowcount == 0:
+                raise HTTPException(404, detail="Learning not found")
     return {"status": "ok"}
 
 
 @app.delete("/api/learnings/{learning_id}")
 async def delete_learning(learning_id: int):
-    with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.execute("DELETE FROM learnings WHERE id = ?", (learning_id,))
-        conn.commit()
-    if cur.rowcount == 0:
-        raise HTTPException(404, detail="Learning not found")
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM learnings WHERE id = %s", (learning_id,))
+            if cur.rowcount == 0:
+                raise HTTPException(404, detail="Learning not found")
     return {"status": "ok"}
 
 
-PANEL_SPECIALISTS = ["plant-biologist", "water-specialist", "aquaponics-specialist"]
+PANEL_SPECIALISTS = ["water-specialist", "aquaponics-specialist"]
 
 
 def _load_spec_meta(specialist_id: str) -> dict:
@@ -646,7 +624,6 @@ def _load_spec_meta(specialist_id: str) -> dict:
 
 @app.post("/api/consult")
 async def consult(req: ConsultRequest):
-    """Consult all panel specialists in parallel and return their combined responses."""
     recent = get_recent_entries(14)
     history_text = format_history_for_ai(recent)
     extra = search_jsonl_knowledge(req.query)
@@ -702,7 +679,6 @@ Please provide specific, actionable recommendations. Identify the most pressing 
         specialist_sections.append(f"### {meta['emoji']} {meta['name']}\n\n{text}")
         total_cached += cache_tokens
 
-    # Synthesize all specialist responses into one unified answer
     synthesis_system = (
         "You are an expert aquaponics advisor synthesizing input from multiple specialists "
         "into a single, coherent response for a grower. Combine the insights below into one "
@@ -723,39 +699,38 @@ Please provide specific, actionable recommendations. Identify the most pressing 
 
 @app.delete("/api/entry/{entry_id}")
 async def delete_entry(entry_id: int):
-    with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.execute("DELETE FROM tracking_entries WHERE id = ?", (entry_id,))
-        conn.commit()
-    if cur.rowcount == 0:
-        raise HTTPException(404, detail="Entry not found")
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM tracking_entries WHERE id = %s", (entry_id,))
+            if cur.rowcount == 0:
+                raise HTTPException(404, detail="Entry not found")
     return {"status": "ok"}
 
 
 @app.put("/api/entry/{entry_id}")
 async def update_entry(entry_id: int, entry: TrackingEntry):
-    with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.execute(
-            """UPDATE tracking_entries
-               SET date=?, ph=?, ammonia=?, nitrite=?, nitrate=?,
-                   dissolved_oxygen=?, temperature=?, potassium=?,
-                   calcium=?, magnesium=?, iron=?, plant_notes=?
-               WHERE id=?""",
-            (
-                entry.date, entry.ph, entry.ammonia, entry.nitrite, entry.nitrate,
-                entry.dissolved_oxygen, entry.temperature, entry.potassium,
-                entry.calcium, entry.magnesium, entry.iron, entry.plant_notes,
-                entry_id,
-            ),
-        )
-        conn.commit()
-    if cur.rowcount == 0:
-        raise HTTPException(404, detail="Entry not found")
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE tracking_entries
+                   SET date=%s, ph=%s, ammonia=%s, nitrite=%s, nitrate=%s,
+                       dissolved_oxygen=%s, temperature=%s, potassium=%s,
+                       calcium=%s, magnesium=%s, iron=%s, plant_notes=%s
+                   WHERE id=%s""",
+                (
+                    entry.date, entry.ph, entry.ammonia, entry.nitrite, entry.nitrate,
+                    entry.dissolved_oxygen, entry.temperature, entry.potassium,
+                    entry.calcium, entry.magnesium, entry.iron, entry.plant_notes,
+                    entry_id,
+                ),
+            )
+            if cur.rowcount == 0:
+                raise HTTPException(404, detail="Entry not found")
     return {"status": "ok"}
 
 
 @app.get("/api/specialists")
 async def list_specialists():
-    """List all available AI specialists parsed from agent definition files."""
     specialists: list[dict] = []
     if AGENTS_DIR.exists():
         for path in sorted(AGENTS_DIR.glob("*.md")):
@@ -765,15 +740,13 @@ async def list_specialists():
                 desc_m = re.search(r"^description:\s*(.+)$", content, re.MULTILINE)
                 emoji_m = re.search(r"^emoji:\s*(.+)$", content, re.MULTILINE)
                 color_m = re.search(r'^color:\s*["\']?(.+?)["\']?\s*$', content, re.MULTILINE)
-                specialists.append(
-                    {
-                        "id": path.stem,
-                        "name": name_m.group(1).strip() if name_m else path.stem,
-                        "description": desc_m.group(1).strip() if desc_m else "",
-                        "emoji": emoji_m.group(1).strip() if emoji_m else "🤖",
-                        "color": color_m.group(1).strip() if color_m else "#6b7280",
-                    }
-                )
+                specialists.append({
+                    "id": path.stem,
+                    "name": name_m.group(1).strip() if name_m else path.stem,
+                    "description": desc_m.group(1).strip() if desc_m else "",
+                    "emoji": emoji_m.group(1).strip() if emoji_m else "🤖",
+                    "color": color_m.group(1).strip() if color_m else "#6b7280",
+                })
             except Exception:
                 pass
     return {"specialists": specialists}
@@ -810,60 +783,53 @@ Rules:
 
 
 def build_insights_system() -> str:
-    """Build the insights system prompt with curated knowledge injected."""
     return INSIGHTS_SYSTEM_BASE + "\n\n---\n\n## Your Aquaponics Knowledge Base\n\n" + CURATED_KNOWLEDGE
 
 
 def _get_data_hash() -> str:
-    """Return a fingerprint of the current dataset to detect new entries."""
-    with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.execute(
-            "SELECT COUNT(*), MAX(created_at) FROM tracking_entries"
-        )
-        row = cur.fetchone()
-        return f"{row[0]}_{row[1]}"
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) AS cnt, MAX(created_at) AS last_at FROM tracking_entries")
+            row = cur.fetchone()
+            return f"{row['cnt']}_{row['last_at']}"
 
 
 def _get_cached_insights() -> dict | None:
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.row_factory = sqlite3.Row
-        cur = conn.execute("SELECT * FROM ai_insights WHERE id = 1")
-        row = cur.fetchone()
-        return dict(row) if row else None
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM ai_insights WHERE id = 1")
+            row = cur.fetchone()
+            return dict(row) if row else None
 
 
 def _clear_insights_cache() -> None:
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("DELETE FROM ai_insights WHERE id = 1")
-        conn.commit()
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM ai_insights WHERE id = 1")
 
 
 def _save_insights(content: str, data_hash: str) -> None:
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute(
-            """INSERT INTO ai_insights (id, content, generated_at, data_hash)
-               VALUES (1, ?, ?, ?)
-               ON CONFLICT(id) DO UPDATE SET
-                 content      = excluded.content,
-                 generated_at = excluded.generated_at,
-                 data_hash    = excluded.data_hash""",
-            (content, datetime.utcnow().isoformat(), data_hash),
-        )
-        conn.commit()
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO ai_insights (id, content, generated_at, data_hash)
+                   VALUES (1, %s, %s, %s)
+                   ON CONFLICT (id) DO UPDATE SET
+                     content      = EXCLUDED.content,
+                     generated_at = EXCLUDED.generated_at,
+                     data_hash    = EXCLUDED.data_hash""",
+                (content, datetime.utcnow().isoformat(), data_hash),
+            )
 
 
 @app.get("/api/insights")
 async def get_insights(generate: bool = True):
-    """Return AI insights.
-    generate=false → return cached only (no API call).
-    generate=true  → always regenerate fresh from current data."""
     if not generate:
         cached = _get_cached_insights()
         if cached and cached["content"]:
             return {"insights": cached["content"], "updated_at": cached["generated_at"]}
         return {"insights": None, "updated_at": None}
 
-    # Always regenerate — fetch fresh data so deleted entries are excluded
     entries = get_all_entries(30)
     if len(entries) < 3:
         return {"insights": None, "updated_at": None}
