@@ -286,16 +286,16 @@ function mineralStatus(param, value) {
   return 'alert';
 }
 
-// Ideal K:Ca:Mg ratio = 1:2:1 → Ca/K ideal = 2, Ca/Mg ideal = 2, K/Mg ideal = 1
+// Ideal K:Ca:Mg ratio = 4:4:1 → Ca/K ideal = 1, Ca/Mg ideal = 4, K/Mg ideal = 4
 function ratioStatus(k, ca, mg) {
   if (k == null || ca == null || mg == null || k === 0 || mg === 0) return 'none';
-  const caK  = ca / k;   // ideal: 2
-  const caMg = ca / mg;  // ideal: 2
-  const kMg  = k  / mg;  // ideal: 1
+  const caK  = ca / k;   // ideal: 1
+  const caMg = ca / mg;  // ideal: 4
+  const kMg  = k  / mg;  // ideal: 4
   // Check each ratio against good/warn thresholds
-  const caKStatus  = caK  >= 1.5 && caK  <= 3.0 ? 'good' : caK  >= 1.0 && caK  <= 4.0 ? 'warn' : 'alert';
-  const caMgStatus = caMg >= 1.5 && caMg <= 3.0 ? 'good' : caMg >= 1.0 && caMg <= 4.0 ? 'warn' : 'alert';
-  const kMgStatus  = kMg  >= 0.6 && kMg  <= 1.6 ? 'good' : kMg  >= 0.4 && kMg  <= 2.5 ? 'warn' : 'alert';
+  const caKStatus  = caK  >= 0.7 && caK  <= 1.4 ? 'good' : caK  >= 0.5 && caK  <= 2.0 ? 'warn' : 'alert';
+  const caMgStatus = caMg >= 2.5 && caMg <= 6.0 ? 'good' : caMg >= 1.5 && caMg <= 8.0 ? 'warn' : 'alert';
+  const kMgStatus  = kMg  >= 2.5 && kMg  <= 6.0 ? 'good' : kMg  >= 1.5 && kMg  <= 8.0 ? 'warn' : 'alert';
   const all = [caKStatus, caMgStatus, kMgStatus];
   return all.includes('alert') ? 'alert' : all.includes('warn') ? 'warn' : 'good';
 }
@@ -329,7 +329,7 @@ function renderRatioCard(entry) {
     <div class="param-value ratio-row">
       <span>${r[0]}</span><span class="ratio-colon">:</span><span>${r[1]}</span><span class="ratio-colon">:</span><span>${r[2]}</span>
     </div>
-    <div class="param-range">Ideal ratio ≈ 1 : 2 : 1</div>`;
+    <div class="param-range">Ideal ratio ≈ 4 : 4 : 1</div>`;
 }
 
 // ── AI Insights ────────────────────────────────────────────
