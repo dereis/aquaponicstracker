@@ -224,10 +224,14 @@ body {
   padding: 1rem 1.25rem;
   box-shadow: var(--shadow);
   border-left: 4px solid var(--slate-300);
-  transition: transform .1s;
+  cursor: pointer;
+  transition: transform .15s ease, box-shadow .15s ease;
 }
 
-.param-card:hover { transform: translateY(-1px); }
+.param-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 6px 20px rgba(0,0,0,.12);
+}
 
 .param-card.status-good  { border-left-color: var(--green-500); background: var(--green-50); }
 .param-card.status-warn  { border-left-color: var(--yellow-400); background: var(--yellow-50); }
@@ -601,6 +605,61 @@ body {
 /* Supplement log list spacing */
 .supp-log-list { margin-top: 1.5rem; }
 
+/* ── Supplement safety check result ─────────────────────── */
+.supp-check-result {
+  margin-top: 1rem;
+  border: 1.5px solid var(--yellow-400);
+  border-radius: var(--radius);
+  background: var(--yellow-50);
+  overflow: hidden;
+}
+
+.supp-check-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: .65rem 1rem;
+  background: var(--yellow-400);
+  color: #78350f;
+}
+
+.supp-check-title {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  font-size: .82rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.supp-check-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: .95rem;
+  color: #78350f;
+  line-height: 1;
+  padding: .1rem .25rem;
+  border-radius: 4px;
+}
+
+.supp-check-close:hover { background: rgba(0,0,0,.08); }
+
+.supp-check-loading {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  padding: 1rem 1.25rem;
+  font-size: .88rem;
+  color: var(--slate-600);
+}
+
+.supp-check-result .response-body {
+  padding: 1rem 1.25rem;
+  font-size: .875rem;
+}
+
 /* ── Specialist grid ─────────────────────────────────────── */
 .specialist-grid {
   display: flex;
@@ -784,7 +843,9 @@ body {
 /* ── History table ───────────────────────────────────────── */
 .history-controls {
   display: flex;
+  align-items: center;
   gap: .5rem;
+  flex-wrap: wrap;
 }
 
 .history-controls select {
@@ -795,6 +856,55 @@ body {
   color: var(--slate-700);
   background: #fff;
   cursor: pointer;
+}
+
+/* ── History collapsible sections ────────────────────────── */
+.history-section {
+  margin-bottom: 1.25rem;
+}
+
+.history-section-toggle {
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+  width: 100%;
+  padding: .65rem 1rem;
+  background: var(--slate-800);
+  color: rgba(255,255,255,.9);
+  border: none;
+  border-radius: var(--radius) var(--radius) 0 0;
+  font-size: .82rem;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  cursor: pointer;
+  text-align: left;
+}
+
+.history-section-toggle:hover {
+  background: var(--slate-700);
+}
+
+.toggle-chevron {
+  transition: transform .2s ease;
+  flex-shrink: 0;
+}
+
+.history-section-toggle[aria-expanded="false"] .toggle-chevron {
+  transform: rotate(-90deg);
+}
+
+.history-section-body {
+  overflow: hidden;
+}
+
+.history-section-body.collapsed {
+  display: none;
+}
+
+/* When section is open, remove top radius from table-wrap inside */
+.history-section-body .table-wrap {
+  border-radius: 0 0 var(--radius) var(--radius);
 }
 
 .table-wrap {
@@ -851,7 +961,14 @@ body {
 }
 
 /* ── History action buttons ──────────────────────────────── */
-.actions-cell { white-space: nowrap; }
+.actions-cell {
+  white-space: nowrap;
+  text-align: center;
+}
+
+.history-table th:last-child {
+  text-align: center;
+}
 
 .btn-icon {
   display: inline-flex;
@@ -873,6 +990,78 @@ body {
 .btn-delete { background: var(--red-50); color: var(--red-600); }
 .btn-delete:hover { background: var(--red-400); }
 
+/* ── Quick Log Modal ─────────────────────────────────────── */
+.quick-log-modal {
+  border: none;
+  border-radius: var(--radius);
+  padding: 0;
+  box-shadow: 0 16px 48px rgba(0,0,0,.22);
+  width: min(96vw, 420px);
+  max-height: 90vh;
+  overflow-y: auto;
+  /* Force center in viewport */
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  margin: 0;
+}
+
+.quick-log-modal::backdrop {
+  background: rgba(15, 23, 42, .5);
+}
+
+.ql-tabs {
+  display: flex;
+  gap: .3rem;
+  margin: .85rem 0 .25rem;
+}
+
+.ql-tab-btn {
+  flex: 1;
+  padding: .4rem .75rem;
+  border: 1.5px solid var(--slate-200);
+  border-radius: 8px;
+  background: var(--slate-50);
+  color: var(--slate-600);
+  font-size: .85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s, border-color .15s, color .15s;
+}
+
+.ql-tab-btn.active {
+  background: var(--green-600);
+  border-color: var(--green-600);
+  color: #fff;
+}
+
+.ql-tab-btn:not(.active):hover {
+  border-color: var(--slate-300);
+  background: var(--slate-100);
+}
+
+/* ── History action buttons (Export / Import) ────────────── */
+.history-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  padding: .33rem .65rem;
+  border: 1px solid var(--slate-200);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--slate-600);
+  font-size: .82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .12s, border-color .12s;
+}
+
+.history-action-btn:hover {
+  background: var(--slate-50);
+  border-color: var(--slate-300);
+}
+
 /* ── Edit modal ──────────────────────────────────────────── */
 .edit-modal {
   border: none;
@@ -883,6 +1072,11 @@ body {
   width: 92vw;
   max-height: 88vh;
   overflow-y: auto;
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  margin: 0;
 }
 
 .edit-modal::backdrop { background: rgba(0,0,0,.45); }
@@ -1173,6 +1367,11 @@ body {
   max-width: 360px;
   box-shadow: 0 8px 40px rgba(0,0,0,.18);
   background: #fff;
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  margin: 0;
 }
 .confirm-dialog::backdrop {
   background: rgba(15,23,42,.35);

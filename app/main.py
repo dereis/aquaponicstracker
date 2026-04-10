@@ -367,6 +367,43 @@ def get_local_date() -> str:
     return datetime.now().strftime("%Y-%m-%d")
 
 
+def get_recent_supplements(days: int = 14) -> list[dict]:
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cutoff = _date_cutoff(days)
+            cur.execute(
+                """SELECT sl.date, st.nutrient_key, st.name AS type_name, sl.amount, sl.unit, sl.notes
+                   FROM supplement_log sl
+                   LEFT JOIN supplement_types st ON sl.supplement_type_id = st.id
+                   WHERE sl.date >= %s
+                   ORDER BY sl.date DESC, sl.created_at DESC
+                   LIMIT 100""",
+                (cutoff,),
+            )
+            return [dict(row) for row in cur.fetchall()]
+
+
+def format_supplement_history_for_ai(entries: list[dict]) -> str:
+    if not entries:
+        return "## Recent Supplementation\n\nNo supplements recorded in the past 14 days."
+    lines = [
+        "## Recent Supplementation",
+        "| Date | Nutrient | Type | Amount | Unit | Notes |",
+        "|------|----------|------|--------|------|-------|",
+    ]
+    for e in entries:
+        nutrient = (e.get("nutrient_key") or "—").replace("_", " ").title()
+        lines.append(
+            f"| {e['date']} "
+            f"| {nutrient} "
+            f"| {e.get('type_name') or '—'} "
+            f"| {e.get('amount') if e.get('amount') is not None else '—'} "
+            f"| {e.get('unit') or '—'} "
+            f"| {e.get('notes') or '—'} |"
+        )
+    return "\n".join(lines)
+
+
 def format_history_for_ai(entries: list[dict]) -> str:
     today = get_local_date()
     header = f"**Today's date: {today}**\n\n"
@@ -581,7 +618,43 @@ class LearningEntry(BaseModel):
 
 class ConsultRequest(BaseModel):
     query: str = ""
-    mode: str = "diagnose"  # "diagnose" | "recommend"
+    mode: str = "diagnose"  # "diagnose" | "recommend" | "ask"
+
+
+class BulkReadingRow(BaseModel):
+    date: str
+    ph: Optional[float] = None
+    ammonia: Optional[float] = None
+    nitrite: Optional[float] = None
+    nitrate: Optional[float] = None
+    dissolved_oxygen: Optional[float] = None
+    temperature: Optional[float] = None
+    potassium: Optional[float] = None
+    calcium: Optional[float] = None
+    magnesium: Optional[float] = None
+    iron: Optional[float] = None
+    plant_notes: Optional[str] = None
+
+
+class BulkSuppRow(BaseModel):
+    date: str
+    nutrient: str
+    type: str
+    amount: float
+    unit: str = "ppm"
+    notes: Optional[str] = None
+
+
+class BulkImportPayload(BaseModel):
+    readings: list[BulkReadingRow] = []
+    supplements: list[BulkSuppRow] = []
+
+
+class SupplementCheckRequest(BaseModel):
+    nutrient: str = ""        # e.g. "potassium"
+    type_name: str = ""       # e.g. "Potassium Citrate"
+    amount: Optional[float] = None
+    unit: str = "ppm"
 
 
 class LoginRequest(BaseModel):
@@ -713,10 +786,15 @@ async def get_latest():
 async def diagnose(req: DiagnoseRequest):
     recent = get_recent_entries(14)
     history_text = format_history_for_ai(recent)
+    supp_text = format_supplement_history_for_ai(get_recent_supplements(14))
     extra = search_jsonl_knowledge(req.symptoms)
     system_content = build_system_prompt(req.specialist, extra)
 
     user_message = f"""{history_text}
+
+---
+
+{supp_text}
 
 ---
 
@@ -744,6 +822,7 @@ Structure your response as:
 async def recommend(req: RecommendRequest):
     recent = get_recent_entries(14)
     history_text = format_history_for_ai(recent)
+    supp_text = format_supplement_history_for_ai(get_recent_supplements(14))
     question = req.question.strip() or (
         "Based on my recent tracking data, what are the most important issues "
         "I should address in my aquaponics system right now?"
@@ -752,6 +831,10 @@ async def recommend(req: RecommendRequest):
     system_content = build_system_prompt(req.specialist, extra)
 
     user_message = f"""{history_text}
+
+---
+
+{supp_text}
 
 ---
 
@@ -765,6 +848,53 @@ Please provide specific, actionable recommendations. Identify the most pressing 
 
     text, cache_tokens = call_claude(system_content, user_message)
     return {"response": text, "specialist": req.specialist, "cached_tokens": cache_tokens}
+
+
+@app.post("/api/supplement-check")
+async def supplement_check(req: SupplementCheckRequest):
+    recent = get_recent_entries(14)
+    history_text = format_history_for_ai(recent)
+    supp_text = format_supplement_history_for_ai(get_recent_supplements(30))
+
+    if req.nutrient and req.type_name and req.amount is not None:
+        planned = (
+            f"The grower is planning to add **{req.amount} {req.unit} of {req.type_name}** "
+            f"({req.nutrient.replace('_', ' ').title()}) to the system."
+        )
+    else:
+        planned = "The grower wants a general review of their recent supplementation history for potential issues."
+
+    query_text = f"{req.nutrient} {req.type_name} nutrient toxicity lockout imbalance aquaponics"
+    extra = search_jsonl_knowledge(query_text.strip())
+    system_content = build_system_prompt("aquaponics-specialist", extra)
+
+    user_message = f"""{history_text}
+
+---
+
+{supp_text}
+
+---
+
+## Supplementation Safety Check
+
+{planned}
+
+---
+
+Please analyse this planned addition (and the recent supplementation history) for potential risks. Cover each of the following that is relevant:
+
+1. **Nutrient toxicity** — could this dose push any element to harmful levels given what's already been added recently?
+2. **Nutrient lockout** — could this addition interfere with the uptake of other nutrients (e.g. excess K competing with Ca/Mg)?
+3. **pH impact** — will this supplement meaningfully shift pH, and is that safe given current readings?
+4. **Nutrient imbalance** — does this affect the K:Ca:Mg balance or other important ratios?
+5. **Deficiency risk** — could adding this create or worsen a deficiency of another nutrient through antagonism?
+6. **Overall verdict** — is it safe to add now, should the dose be adjusted, or should it be postponed?
+
+Keep each point concise and data-driven. Cite the knowledge base or personal learnings for every claim. If a category has no concern, state "No concern" in one sentence."""
+
+    text, _ = call_claude(system_content, user_message)
+    return {"response": text}
 
 
 @app.post("/api/learnings")
@@ -829,10 +959,15 @@ def _load_spec_meta(specialist_id: str) -> dict:
 async def consult(req: ConsultRequest):
     recent = get_recent_entries(14)
     history_text = format_history_for_ai(recent)
+    supp_text = format_supplement_history_for_ai(get_recent_supplements(14))
     extra = search_jsonl_knowledge(req.query)
 
     if req.mode == "diagnose":
         user_message = f"""{history_text}
+
+---
+
+{supp_text}
 
 ---
 
@@ -851,12 +986,16 @@ Structure your response as:
 4. **Confirmation steps** — what to test or observe to confirm
 5. **Corrective actions** — specific steps in priority order, with products and approximate doses where relevant
 6. **Timeline** — when to expect improvement after intervention"""
-    else:
+    elif req.mode == "recommend":
         question = req.query.strip() or (
             "Based on my recent tracking data, what are the most important issues "
             "I should address in my aquaponics system right now?"
         )
         user_message = f"""{history_text}
+
+---
+
+{supp_text}
 
 ---
 
@@ -868,6 +1007,30 @@ Structure your response as:
 
 Please provide specific, actionable recommendations. Identify the most pressing issues first, explain the science behind your recommendations, and give concrete steps the grower can take. Where parameters are out of range, specify target values and how to achieve them."""
 
+    else:  # "ask" — single-call, no panel overhead
+        question = req.query.strip()
+        grower_input = question or "No specific question — please provide a comprehensive system overview based on my recent data."
+        user_message = f"""{history_text}
+
+---
+
+{supp_text}
+
+---
+
+## Grower's Input
+
+{grower_input}
+
+---
+
+Please answer comprehensively. If the input describes plant or system symptoms, diagnose the most likely causes and corrective actions. If it asks a question, answer it with specific guidance. If no question is given, identify the most important issues and opportunities in the current data. Draw on the knowledge base and personal learnings where relevant. Cite all sources inline. Prioritize actionable insights."""
+
+        system_content = build_system_prompt("aquaponics-specialist", extra)
+        text, cache_tokens = await asyncio.to_thread(call_claude, system_content, user_message)
+        return {"response": text, "cached_tokens": cache_tokens}
+
+    # "diagnose" and "recommend" modes use the full two-specialist panel + synthesis
     async def call_specialist(specialist_id: str):
         system_content = build_system_prompt(specialist_id, extra)
         text, cache_tokens = await asyncio.to_thread(call_claude, system_content, user_message)
@@ -980,19 +1143,35 @@ Rules:
   interpret the plant notes for likely causes, assess whether the logged parameters suggest any issues, \
   and flag anything worth watching. Do not refuse to analyse just because there is limited history.
 - Do not give general aquaponics advice — only observations grounded in this grower's actual data
-- **Every bullet point MUST end with an inline citation** from the knowledge base to support the \
-  domain claim being made. Use this exact format — no bold, no square brackets around the source name: \
-  `Source: [Source Name](/knowledge/filename.md). *"short direct quote."*` \
-  Available links: [Water Chemistry](/knowledge/water-chemistry.md), \
-  [Nutrient Deficiencies](/knowledge/nutrient-deficiencies.md), \
-  [Plant Symptoms](/knowledge/plant-symptoms.md), \
-  [Aquaponics System Guide](/knowledge/aquaponics-system-guide.md). \
-  If a bullet contains no citable domain knowledge, note "(data only)" at the end instead.\
+- **Every bullet point MUST end with an inline citation** from the knowledge base OR the grower's personal learnings: \
+  - For knowledge base: `Source: [Source Name](/knowledge/filename.md). *"short direct quote."*` \
+    Available links: [Water Chemistry](/knowledge/water-chemistry.md), \
+    [Nutrient Deficiencies](/knowledge/nutrient-deficiencies.md), \
+    [Plant Symptoms](/knowledge/plant-symptoms.md), \
+    [Aquaponics System Guide](/knowledge/aquaponics-system-guide.md). \
+  - For personal learnings: **[Grower Learning: Title](#learning-{id})** \
+  - If a bullet contains no citable domain knowledge or learning, note "(data only)" at the end instead.\
 """
 
 
-def build_insights_system() -> str:
-    return INSIGHTS_SYSTEM_BASE + "\n\n---\n\n## Your Aquaponics Knowledge Base\n\n" + CURATED_KNOWLEDGE
+def build_insights_specialist_prompt(agent_id: str) -> str:
+    """Insights analysis instructions merged with a specialist's persona and knowledge."""
+    agent_prompt = load_agent_prompt(agent_id)
+    learnings = load_learnings_knowledge()
+
+    sections = [
+        INSIGHTS_SYSTEM_BASE,
+        "---",
+        agent_prompt,
+        "---",
+        GROWER_CONTEXT,
+        "---",
+        "## Your Aquaponics Knowledge Base",
+        CURATED_KNOWLEDGE,
+    ]
+    if learnings:
+        sections.append(learnings)
+    return "\n\n".join(filter(None, sections))
 
 
 def _get_data_hash() -> str:
@@ -1045,11 +1224,38 @@ async def get_insights(generate: bool = True):
 
     current_hash = _get_data_hash()
     history_text = format_history_for_ai(entries)
-    learnings = load_learnings_knowledge()
-    full_input = history_text + ("\n\n" + learnings if learnings else "")
-    text, _ = await asyncio.to_thread(call_claude, build_insights_system(), full_input)
-    _save_insights(text, current_hash)
-    return {"insights": text, "updated_at": datetime.now().isoformat()}
+    supp_text = format_supplement_history_for_ai(get_recent_supplements(30))
+    full_input = history_text + "\n\n---\n\n" + supp_text
+
+    # Run both specialists in parallel
+    async def call_insights_specialist(specialist_id: str):
+        system_content = build_insights_specialist_prompt(specialist_id)
+        text, cache_tokens = await asyncio.to_thread(call_claude, system_content, full_input)
+        return specialist_id, text, cache_tokens
+
+    results = await asyncio.gather(*[call_insights_specialist(sid) for sid in PANEL_SPECIALISTS])
+
+    specialist_sections = []
+    for sid, text, _ in results:
+        meta = _load_spec_meta(sid)
+        specialist_sections.append(f"### {meta['emoji']} {meta['name']}\n\n{text}")
+
+    synthesis_system = (
+        "You are an expert aquaponics advisor synthesizing data-driven insights from two specialists "
+        "into a single, coherent set of bullet-point observations for a grower. "
+        "Combine the insights below — eliminate redundancy, resolve contradictions, and produce "
+        "3–6 concrete, data-driven bullets in priority order. "
+        "Do not refer to the specialists by name or mention multiple sources were consulted. "
+        "Write directly to the grower. "
+        "Preserve all inline citations exactly as they appear — "
+        "`Source: [Name](/knowledge/file.md). *\"quote\"*` and `**[Grower Learning: Title](#learning-id)**` — "
+        "so every claim stays traceable."
+    )
+    synthesis_input = "\n\n---\n\n".join(specialist_sections)
+    synthesized, _ = await asyncio.to_thread(call_claude, synthesis_system, synthesis_input)
+
+    _save_insights(synthesized, current_hash)
+    return {"insights": synthesized, "updated_at": datetime.now().isoformat()}
 
 
 # ---------------------------------------------------------------------------
@@ -1174,6 +1380,22 @@ async def get_supplement_log(days: int = 30):
             return {"entries": [dict(r) for r in cur.fetchall()]}
 
 
+@app.put("/api/supplements/{entry_id}")
+async def update_supplement_log(entry_id: int, entry: SupplementLogEntry):
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE supplement_log
+                   SET date=%s, supplement_type_id=%s, amount=%s, unit=%s, notes=%s
+                   WHERE id=%s""",
+                (entry.date, entry.supplement_type_id, entry.amount, entry.unit, entry.notes, entry_id),
+            )
+            if cur.rowcount == 0:
+                raise HTTPException(404, detail="Entry not found")
+    _clear_insights_cache()
+    return {"status": "ok"}
+
+
 @app.delete("/api/supplements/{entry_id}")
 async def delete_supplement_log(entry_id: int):
     with get_db() as conn:
@@ -1182,6 +1404,102 @@ async def delete_supplement_log(entry_id: int):
             if cur.rowcount == 0:
                 raise HTTPException(404, detail="Entry not found")
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# Bulk import route
+# ---------------------------------------------------------------------------
+
+@app.post("/api/bulk-import")
+async def bulk_import(payload: BulkImportPayload):
+    readings_added = 0
+    readings_updated = 0
+    supplements_added = 0
+    supplements_skipped = 0
+
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            # ── Readings: upsert by date (new values win for non-null fields) ──
+            for row in payload.readings:
+                row_dict = row.model_dump()
+                cur.execute(
+                    "SELECT * FROM tracking_entries WHERE date = %s ORDER BY id DESC LIMIT 1",
+                    (row.date,),
+                )
+                existing = cur.fetchone()
+                if existing:
+                    existing = dict(existing)
+                    merged = {
+                        f: (row_dict[f] if row_dict[f] is not None else existing.get(f))
+                        for f in NUMERIC_FIELDS
+                    }
+                    merged["plant_notes"] = (
+                        row_dict["plant_notes"] if row_dict["plant_notes"] is not None
+                        else existing.get("plant_notes")
+                    )
+                    cur.execute(
+                        """UPDATE tracking_entries
+                           SET ph=%s, ammonia=%s, nitrite=%s, nitrate=%s, dissolved_oxygen=%s,
+                               temperature=%s, potassium=%s, calcium=%s, magnesium=%s, iron=%s,
+                               plant_notes=%s, created_at=TO_CHAR(NOW(), 'YYYY-MM-DD HH24:MI:SS')
+                           WHERE id=%s""",
+                        (
+                            merged["ph"], merged["ammonia"], merged["nitrite"], merged["nitrate"],
+                            merged["dissolved_oxygen"], merged["temperature"], merged["potassium"],
+                            merged["calcium"], merged["magnesium"], merged["iron"],
+                            merged["plant_notes"], existing["id"],
+                        ),
+                    )
+                    readings_updated += 1
+                else:
+                    cur.execute(
+                        """INSERT INTO tracking_entries
+                           (date, ph, ammonia, nitrite, nitrate, dissolved_oxygen,
+                            temperature, potassium, calcium, magnesium, iron, plant_notes)
+                           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                        (
+                            row.date, row_dict["ph"], row_dict["ammonia"], row_dict["nitrite"],
+                            row_dict["nitrate"], row_dict["dissolved_oxygen"], row_dict["temperature"],
+                            row_dict["potassium"], row_dict["calcium"], row_dict["magnesium"],
+                            row_dict["iron"], row_dict["plant_notes"],
+                        ),
+                    )
+                    readings_added += 1
+
+            # ── Supplements: add if not exact duplicate ──
+            for row in payload.supplements:
+                cur.execute(
+                    "SELECT id FROM supplement_types WHERE nutrient_key = %s AND LOWER(name) = LOWER(%s)",
+                    (row.nutrient, row.type),
+                )
+                type_row = cur.fetchone()
+                if not type_row:
+                    supplements_skipped += 1
+                    continue
+                type_id = type_row["id"]
+                cur.execute(
+                    """SELECT id FROM supplement_log
+                       WHERE date = %s AND supplement_type_id = %s
+                         AND amount = %s AND unit = %s""",
+                    (row.date, type_id, row.amount, row.unit),
+                )
+                if cur.fetchone():
+                    supplements_skipped += 1
+                    continue
+                cur.execute(
+                    """INSERT INTO supplement_log (date, supplement_type_id, amount, unit, notes)
+                       VALUES (%s, %s, %s, %s, %s)""",
+                    (row.date, type_id, row.amount, row.unit, row.notes),
+                )
+                supplements_added += 1
+
+    _clear_insights_cache()
+    return {
+        "readings_added": readings_added,
+        "readings_updated": readings_updated,
+        "supplements_added": supplements_added,
+        "supplements_skipped": supplements_skipped,
+    }
 
 
 # ---------------------------------------------------------------------------

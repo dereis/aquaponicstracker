@@ -78,10 +78,22 @@ async function apiFetch(url, options = {}) {
 
 // ── State ──────────────────────────────────────────────────
 let currentTab = 'dashboard';
-let currentMode = 'diagnose'; // 'diagnose' | 'recommend'
 let trendChart = null;
 let historyEntries = [];
+let suppHistoryEntries = [];
 let appSettings = { visible_params: null }; // null = all visible (default until loaded)
+
+// Map from param key → supplement nutrient key (only for params that have supplements)
+const PARAM_TO_NUTRIENT = {
+  ph:        'ph_adjustment',
+  potassium: 'potassium',
+  calcium:   'calcium',
+  magnesium: 'magnesium',
+  iron:      'iron',
+};
+
+let quickLogParamKey = null;
+let quickLogMode = 'reading'; // 'reading' | 'supplement'
 
 const NUTRIENT_LABELS = {
   calcium:        'Calcium (Ca)',
@@ -361,7 +373,7 @@ async function loadCachedInsights() {
 async function generateInsights() {
   const body  = document.getElementById('insights-body');
   const regen = document.getElementById('insights-regen-btn');
-  body.innerHTML = '<span class="insights-loading">Analyzing your data…</span>';
+  body.innerHTML = '<span class="insights-loading">Consulting specialists and analyzing your data…</span>';
   regen.style.display = 'none';
 
   try {
@@ -403,6 +415,7 @@ function renderParamCards(entry) {
 
     const card = document.createElement('div');
     card.className = `param-card status-${status}`;
+    card.title = `Click to log ${p.label}`;
     card.innerHTML = `
       <div class="param-label">
         <span class="status-dot"></span>${p.label}
@@ -410,6 +423,7 @@ function renderParamCards(entry) {
       <div class="param-value">${displayVal}<span class="param-unit">${p.unit}</span></div>
       <div class="param-range">${p.description}</div>
     `;
+    card.addEventListener('click', () => openQuickLog(p.key));
     grid.appendChild(card);
   });
 }
@@ -573,32 +587,12 @@ PARAMS.forEach(param => {
 
 // ── AI Advisor ──────────────────────────────────────────────
 
-// Mode toggle
-document.querySelectorAll('.mode-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    currentMode = btn.dataset.mode;
-    document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    const textarea = document.getElementById('ai-query');
-    if (textarea) {
-      textarea.placeholder = currentMode === 'diagnose'
-        ? 'Describe the symptoms you\'re observing...'
-        : 'Ask a question or leave blank for a general system review...';
-    }
-  });
-});
-
 async function submitAIQuery() {
   const query = document.getElementById('ai-query').value.trim();
   const submitBtn = document.getElementById('ai-submit-btn');
   const loading = document.getElementById('ai-loading');
   const responseCard = document.getElementById('ai-response-card');
   const responseBody = document.getElementById('ai-response-body');
-
-  if (currentMode === 'diagnose' && !query) {
-    document.getElementById('ai-query').focus();
-    return;
-  }
 
   submitBtn.style.display = 'none';
   loading.style.display = 'flex';
@@ -608,7 +602,7 @@ async function submitAIQuery() {
     const res = await apiFetch('/api/consult', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, mode: currentMode }),
+      body: JSON.stringify({ query, mode: 'ask' }),
     });
 
     if (!res.ok) {
@@ -637,9 +631,14 @@ let historyEntriesMap = {};
 async function loadHistory() {
   const days = parseInt(document.getElementById('history-days').value);
   try {
-    const res = await apiFetch(`/api/history?days=${days}`);
-    const { entries } = await res.json();
-    renderHistoryTable(entries.slice().reverse()); // newest first for display
+    const [readRes, suppRes] = await Promise.all([
+      apiFetch(`/api/history?days=${days}`),
+      apiFetch(`/api/supplements?days=${days}`),
+    ]);
+    const { entries } = await readRes.json();
+    const { entries: suppEntries } = await suppRes.json();
+    renderHistoryTable(entries.slice().reverse()); // newest first
+    renderSuppHistoryTable(suppEntries);
   } catch (e) {
     console.error('History load error:', e);
   }
@@ -677,7 +676,506 @@ function renderHistoryTable(entries) {
   }).join('');
 }
 
+function renderSuppHistoryTable(entries) {
+  suppHistoryEntries = entries;
+  const tbody = document.getElementById('supp-history-tbody');
+  if (!entries.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No supplements recorded</td></tr>';
+    return;
+  }
+  tbody.innerHTML = entries.map(e => {
+    const nutrient = NUTRIENT_LABELS[e.nutrient_key] || (e.nutrient_key || '—').replace(/_/g,' ').replace(/\b\w/g, c => c.toUpperCase());
+    const notes = e.notes
+      ? `<td class="notes-cell" title="${e.notes.replace(/"/g,'&quot;')}">${e.notes}</td>`
+      : '<td>—</td>';
+    const actions = `<td class="actions-cell">
+      <button class="btn-icon btn-edit" onclick="openEditSuppModal(${e.id})" title="Edit">✏️</button>
+      <button class="btn-icon btn-delete" onclick="deleteSuppHistoryEntry(${e.id})" title="Delete">🗑️</button>
+    </td>`;
+    return `<tr>
+      <td>${e.date}</td>
+      <td>${nutrient}</td>
+      <td>${e.type_name || '—'}</td>
+      <td>${e.amount !== null && e.amount !== undefined ? e.amount : '—'}</td>
+      <td>${e.unit || '—'}</td>
+      ${notes}
+      ${actions}
+    </tr>`;
+  }).join('');
+}
+
+async function deleteSuppHistoryEntry(id) {
+  if (!confirm('Delete this supplement entry?')) return;
+  try {
+    await apiFetch(`/api/supplements/${id}`, { method: 'DELETE' });
+    loadHistory();
+  } catch (e) {
+    console.error('Delete supplement error:', e);
+  }
+}
+
+// ── Edit Supplement Modal ─────────────────────────────────────
+let editSuppEntryCache = {}; // id → entry
+
+function openEditSuppModal(id) {
+  const e = suppHistoryEntries.find(x => x.id === id);
+  if (!e) return;
+  editSuppEntryCache[id] = e;
+
+  document.getElementById('edit-supp-id').value = id;
+  document.getElementById('edit-supp-date').value = e.date;
+  document.getElementById('edit-supp-amount').value = e.amount ?? '';
+  document.getElementById('edit-supp-unit').value = e.unit || 'ppm';
+  document.getElementById('edit-supp-notes').value = e.notes || '';
+  document.getElementById('edit-supp-status').textContent = '';
+
+  // Set nutrient, then load types and pre-select the current type
+  const nutrientSel = document.getElementById('edit-supp-nutrient');
+  nutrientSel.value = e.nutrient_key || '';
+  loadEditSuppTypes(e.nutrient_key, e.supplement_type_id);
+
+  document.getElementById('edit-supp-modal').showModal();
+}
+
+function closeEditSuppModal() {
+  document.getElementById('edit-supp-modal').close();
+}
+
+async function loadEditSuppTypes(nutrientKey, preselectTypeId = null) {
+  const typeSelect = document.getElementById('edit-supp-type');
+  typeSelect.disabled = true;
+  typeSelect.innerHTML = '<option value="">Loading…</option>';
+  if (!nutrientKey) {
+    typeSelect.innerHTML = '<option value="">Select nutrient first…</option>';
+    return;
+  }
+  try {
+    const res = await apiFetch(`/api/supplement-types?nutrient_key=${nutrientKey}`);
+    const { types } = await res.json();
+    const plainName = nutrientKey.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    const stripPrefix = name => {
+      const prefix = plainName.toLowerCase() + ' ';
+      return name.toLowerCase().startsWith(prefix) ? name.slice(plainName.length + 1) : name;
+    };
+    typeSelect.innerHTML = '<option value="">Select type…</option>' +
+      types.map(t => `<option value="${t.id}">${stripPrefix(t.name)}</option>`).join('');
+    typeSelect.disabled = false;
+    if (preselectTypeId) typeSelect.value = String(preselectTypeId);
+  } catch {
+    typeSelect.innerHTML = '<option value="">Error loading types</option>';
+  }
+}
+
+async function saveEditSupp() {
+  const id     = document.getElementById('edit-supp-id').value;
+  const btn    = document.getElementById('edit-supp-save-btn');
+  const status = document.getElementById('edit-supp-status');
+
+  const date   = document.getElementById('edit-supp-date').value;
+  const typeId = parseInt(document.getElementById('edit-supp-type').value);
+  const amount = parseFloat(document.getElementById('edit-supp-amount').value);
+  const unit   = document.getElementById('edit-supp-unit').value;
+  const notes  = document.getElementById('edit-supp-notes').value.trim() || null;
+
+  status.style.color = 'var(--red-600)';
+  if (!date)              { status.textContent = 'Date is required.'; return; }
+  if (!typeId)            { status.textContent = 'Select a supplement type.'; return; }
+  if (isNaN(amount) || amount <= 0) { status.textContent = 'Enter an amount greater than 0.'; return; }
+
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+  status.textContent = '';
+
+  try {
+    const res = await apiFetch(`/api/supplements/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date, supplement_type_id: typeId, amount, unit, notes }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    closeEditSuppModal();
+    loadHistory();
+  } catch (err) {
+    status.textContent = 'Error: ' + err.message;
+    status.style.color = 'var(--red-600)';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Save Changes';
+  }
+}
+
+// Collapsible history section toggles
+document.querySelectorAll('.history-section-toggle').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const targetId = btn.getAttribute('data-target');
+    const body = document.getElementById(targetId);
+    const isExpanded = btn.getAttribute('aria-expanded') === 'true';
+    btn.setAttribute('aria-expanded', String(!isExpanded));
+    body.classList.toggle('collapsed', isExpanded);
+  });
+});
+
 document.getElementById('history-days').addEventListener('change', loadHistory);
+
+// ── Quick Log Modal (dashboard card click) ───────────────────
+
+function openQuickLog(paramKey) {
+  quickLogParamKey = paramKey;
+  quickLogMode = 'reading';
+
+  const param = PARAMS.find(p => p.key === paramKey);
+  if (!param) return;
+
+  document.getElementById('ql-title').textContent = `Log ${param.label}`;
+  document.getElementById('ql-date').value = localDateString();
+  document.getElementById('ql-value').value = '';
+  document.getElementById('ql-unit').textContent = param.unit || '—';
+  document.getElementById('ql-param-label').textContent = param.label;
+  document.getElementById('ql-supp-amount').value = '';
+  document.getElementById('ql-supp-notes').value = '';
+  document.getElementById('ql-status').textContent = '';
+
+  const nutrientKey = PARAM_TO_NUTRIENT[paramKey];
+  const tabs = document.getElementById('ql-tabs');
+  if (nutrientKey) {
+    tabs.style.display = '';
+    document.querySelectorAll('.ql-tab-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.qltab === 'reading');
+    });
+    loadQuickLogSupplementTypes(nutrientKey);
+  } else {
+    tabs.style.display = 'none';
+  }
+  document.getElementById('ql-reading-panel').style.display = '';
+  document.getElementById('ql-supp-panel').style.display = 'none';
+
+  document.getElementById('quick-log-modal').showModal();
+  setTimeout(() => document.getElementById('ql-value').focus(), 50);
+}
+
+function closeQuickLog() {
+  document.getElementById('quick-log-modal').close();
+  quickLogParamKey = null;
+}
+
+async function loadQuickLogSupplementTypes(nutrientKey) {
+  const typeSelect = document.getElementById('ql-supp-type');
+  typeSelect.innerHTML = '<option value="">Loading…</option>';
+  try {
+    const res = await apiFetch(`/api/supplement-types?nutrient_key=${nutrientKey}`);
+    const { types } = await res.json();
+    // Keep full names (user wants to see nutrient name in types)
+    typeSelect.innerHTML = '<option value="">Select type…</option>' +
+      types.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
+    document.getElementById('ql-supp-unit').value =
+      nutrientKey === 'water_change' ? '%' : 'ppm';
+  } catch (e) {
+    typeSelect.innerHTML = '<option value="">Error loading types</option>';
+  }
+}
+
+function switchQuickLogTab(tabName) {
+  quickLogMode = tabName;
+  document.querySelectorAll('.ql-tab-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.qltab === tabName);
+  });
+  document.getElementById('ql-reading-panel').style.display = tabName === 'reading' ? '' : 'none';
+  document.getElementById('ql-supp-panel').style.display = tabName === 'supplement' ? '' : 'none';
+  document.getElementById('ql-status').textContent = '';
+  if (tabName === 'reading') {
+    setTimeout(() => document.getElementById('ql-value').focus(), 50);
+  } else {
+    setTimeout(() => document.getElementById('ql-supp-type').focus(), 50);
+  }
+}
+
+async function saveQuickLog() {
+  const date = document.getElementById('ql-date').value;
+  const status = document.getElementById('ql-status');
+
+  if (!date) { status.textContent = 'Date is required.'; return; }
+
+  const btn = document.getElementById('ql-save-btn');
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+  status.textContent = '';
+
+  try {
+    if (quickLogMode === 'reading') {
+      const value = document.getElementById('ql-value').value.trim();
+      if (value === '') { status.textContent = 'Enter a value.'; return; }
+      const numVal = parseFloat(value);
+      if (isNaN(numVal)) { status.textContent = 'Enter a valid number.'; return; }
+
+      const res = await apiFetch('/api/track', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date, [quickLogParamKey]: numVal }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+
+    } else {
+      const typeId = parseInt(document.getElementById('ql-supp-type').value);
+      const amount = parseFloat(document.getElementById('ql-supp-amount').value);
+      const unit = document.getElementById('ql-supp-unit').value;
+      const notes = document.getElementById('ql-supp-notes').value.trim() || null;
+
+      if (!typeId) { status.textContent = 'Select a supplement type.'; return; }
+      if (isNaN(amount) || amount <= 0) { status.textContent = 'Enter an amount greater than 0.'; return; }
+
+      const res = await apiFetch('/api/supplements', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date, supplement_type_id: typeId, amount, unit, notes }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+    }
+
+    closeQuickLog();
+    loadDashboard();
+
+  } catch (err) {
+    status.textContent = 'Error: ' + err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Save';
+  }
+}
+
+// Close on backdrop click
+document.getElementById('quick-log-modal').addEventListener('click', (e) => {
+  if (e.target === e.currentTarget) closeQuickLog();
+});
+
+// ── Excel Export / Import ────────────────────────────────────
+
+// Map human-readable nutrient label (or raw key) → nutrient_key for import
+const NUTRIENT_IMPORT_MAP = (() => {
+  const m = {};
+  Object.entries(NUTRIENT_LABELS).forEach(([key, label]) => {
+    m[label.toLowerCase()] = key;           // "potassium (k)" → "potassium"
+    m[label.toLowerCase().replace(/\s*\(.*\)/, '').trim()] = key; // "potassium" → "potassium"
+    m[key] = key;                           // raw key passthrough
+    m[key.replace(/_/g, ' ')] = key;        // "ph adjustment" → "ph_adjustment"
+  });
+  return m;
+})();
+
+async function exportToExcel() {
+  if (typeof XLSX === 'undefined') {
+    alert('Excel library not loaded yet. Please wait a moment and try again.');
+    return;
+  }
+
+  // Fetch all supplement types so we can build the reference sheet and validation
+  let allTypes = [];
+  try {
+    const res = await apiFetch('/api/supplement-types?include_disabled=false');
+    const data = await res.json();
+    allTypes = data.types || [];
+  } catch (e) { /* export continues without validation lists */ }
+
+  const wb = XLSX.utils.book_new();
+
+  // ── Readings sheet ──────────────────────────────────────────
+  const readingsData = Object.values(historyEntriesMap)
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map(e => ({
+      Date: e.date,
+      pH: e.ph,
+      Ammonia: e.ammonia,
+      Nitrite: e.nitrite,
+      Nitrate: e.nitrate,
+      Dissolved_Oxygen: e.dissolved_oxygen,
+      Temperature: e.temperature,
+      Potassium: e.potassium,
+      Calcium: e.calcium,
+      Magnesium: e.magnesium,
+      Iron: e.iron,
+      Plant_Notes: e.plant_notes,
+    }));
+
+  const ws1 = XLSX.utils.json_to_sheet(readingsData.length ? readingsData : [
+    { Date: '', pH: '', Ammonia: '', Nitrite: '', Nitrate: '', Dissolved_Oxygen: '',
+      Temperature: '', Potassium: '', Calcium: '', Magnesium: '', Iron: '', Plant_Notes: '' }
+  ]);
+  ws1['!cols'] = [
+    { wch: 12 }, { wch: 6 }, { wch: 10 }, { wch: 10 }, { wch: 10 },
+    { wch: 17 }, { wch: 13 }, { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 8 }, { wch: 35 },
+  ];
+  XLSX.utils.book_append_sheet(wb, ws1, 'Readings');
+
+  // ── Supplements sheet ───────────────────────────────────────
+  const nutrientLabelList = Object.values(NUTRIENT_LABELS).join(',');
+  const suppData = suppHistoryEntries
+    .slice()
+    .reverse()
+    .map(e => ({
+      Date: e.date,
+      Nutrient: NUTRIENT_LABELS[e.nutrient_key] || e.nutrient_key,
+      Type: e.type_name,
+      Amount: e.amount,
+      Unit: e.unit || 'ppm',
+      Notes: e.notes || '',
+    }));
+
+  const ws2 = XLSX.utils.json_to_sheet(suppData.length ? suppData : [
+    { Date: '', Nutrient: '', Type: '', Amount: '', Unit: 'ppm', Notes: '' }
+  ]);
+
+  ws2['!cols'] = [
+    { wch: 12 }, { wch: 20 }, { wch: 28 }, { wch: 10 }, { wch: 8 }, { wch: 35 },
+  ];
+
+  // Data validation: Nutrient dropdown (column B) and Unit dropdown (column E)
+  ws2['!dataValidations'] = [
+    {
+      sqref: 'B2:B10000',
+      type: 'list',
+      formula1: `"${nutrientLabelList}"`,
+      showDropDown: false,
+      showErrorMessage: true,
+      errorTitle: 'Invalid nutrient',
+      error: `Must be one of: ${nutrientLabelList}`,
+    },
+    {
+      sqref: 'E2:E10000',
+      type: 'list',
+      formula1: '"ppm,%"',
+      showDropDown: false,
+      showErrorMessage: true,
+      errorTitle: 'Invalid unit',
+      error: 'Must be ppm or %',
+    },
+  ];
+
+  XLSX.utils.book_append_sheet(wb, ws2, 'Supplements');
+
+  // ── Valid Types reference sheet ─────────────────────────────
+  const refRows = [];
+  Object.entries(NUTRIENT_LABELS).forEach(([key, label]) => {
+    const types = allTypes.filter(t => t.nutrient_key === key);
+    types.forEach((t, i) => {
+      refRows.push({ Nutrient: i === 0 ? label : '', 'Valid Types for this Nutrient': t.name });
+    });
+    if (!types.length) {
+      refRows.push({ Nutrient: label, 'Valid Types for this Nutrient': '(none configured)' });
+    }
+    refRows.push({ Nutrient: '', 'Valid Types for this Nutrient': '' }); // spacer row
+  });
+
+  const wsRef = XLSX.utils.json_to_sheet(refRows);
+  wsRef['!cols'] = [{ wch: 20 }, { wch: 35 }];
+  XLSX.utils.book_append_sheet(wb, wsRef, 'Valid Types');
+
+  XLSX.writeFile(wb, 'aquaponics-data.xlsx');
+}
+
+async function importFromExcel(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  if (typeof XLSX === 'undefined') {
+    alert('Excel library not loaded yet. Please wait a moment and try again.');
+    event.target.value = '';
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    try {
+      const data = new Uint8Array(e.target.result);
+      // cellDates: true converts Excel date serials → JS Date objects
+      const wb = XLSX.read(data, { type: 'array', cellDates: true });
+
+      const readings = [];
+      const supplements = [];
+      const n = v => (v === undefined || v === '' || v === null) ? null : parseFloat(v);
+
+      // Convert whatever SheetJS gives us for a date cell → YYYY-MM-DD string
+      const fmtDate = v => {
+        if (!v) return null;
+        if (v instanceof Date) {
+          const y = v.getFullYear();
+          const m = String(v.getMonth() + 1).padStart(2, '0');
+          const d = String(v.getDate()).padStart(2, '0');
+          return `${y}-${m}-${d}`;
+        }
+        return String(v).trim();
+      };
+
+      // Parse Readings sheet
+      const ws1 = wb.Sheets['Readings'];
+      if (ws1) {
+        XLSX.utils.sheet_to_json(ws1).forEach(row => {
+          const date = fmtDate(row.Date);
+          if (!date) return;
+          readings.push({
+            date,
+            ph: n(row.pH),
+            ammonia: n(row.Ammonia),
+            nitrite: n(row.Nitrite),
+            nitrate: n(row.Nitrate),
+            dissolved_oxygen: n(row.Dissolved_Oxygen),
+            temperature: n(row.Temperature),
+            potassium: n(row.Potassium),
+            calcium: n(row.Calcium),
+            magnesium: n(row.Magnesium),
+            iron: n(row.Iron),
+            plant_notes: row.Plant_Notes ? String(row.Plant_Notes).trim() || null : null,
+          });
+        });
+      }
+
+      // Parse Supplements sheet
+      const ws2 = wb.Sheets['Supplements'];
+      if (ws2) {
+        XLSX.utils.sheet_to_json(ws2).forEach(row => {
+          const date = fmtDate(row.Date);
+          const type = row.Type ? String(row.Type).trim() : null;
+          if (!date || !type) return;
+          // Accept human-readable labels ("Potassium (K)") or raw keys ("potassium")
+          const rawNutrient = row.Nutrient ? String(row.Nutrient).trim() : '';
+          const nutrientKey = NUTRIENT_IMPORT_MAP[rawNutrient.toLowerCase()] || rawNutrient;
+          supplements.push({
+            date,
+            nutrient: nutrientKey,
+            type,
+            amount: parseFloat(row.Amount) || 0,
+            unit: row.Unit ? String(row.Unit).trim() : 'ppm',
+            notes: row.Notes ? String(row.Notes).trim() || null : null,
+          });
+        });
+      }
+
+      if (!readings.length && !supplements.length) {
+        alert('No valid data found in the file. Make sure the sheet names are "Readings" and "Supplements".');
+        return;
+      }
+
+      const res = await apiFetch('/api/bulk-import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ readings, supplements }),
+      });
+      if (!res || !res.ok) throw new Error('Import request failed');
+
+      const result = await res.json();
+      alert(
+        `Import complete!\n\n` +
+        `Readings: ${result.readings_added} added, ${result.readings_updated} updated\n` +
+        `Supplements: ${result.supplements_added} added, ${result.supplements_skipped} skipped`
+      );
+      loadHistory();
+
+    } catch (err) {
+      alert('Import error: ' + err.message);
+    } finally {
+      event.target.value = '';
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
 
 // ── Edit / Delete ────────────────────────────────────────────
 function openEditModal(id) {
@@ -1104,6 +1602,46 @@ async function submitSupplement() {
   } catch (err) {
     status.textContent = '✗ Error: ' + err.message;
     status.style.color = 'var(--red-600)';
+  }
+}
+
+async function checkSupplementIssues() {
+  const result  = document.getElementById('supp-check-result');
+  const loading = document.getElementById('supp-check-loading');
+  const body    = document.getElementById('supp-check-body');
+  const btn     = document.getElementById('supp-check-btn');
+
+  // Read current form state (all optional — AI works with whatever is filled)
+  const nutrientSel = document.getElementById('supp-nutrient');
+  const typeSel     = document.getElementById('supp-type');
+  const nutrient    = nutrientSel.value;
+  const typeId      = typeSel.value;
+  const typeName    = typeId ? typeSel.options[typeSel.selectedIndex].text : '';
+  const amount      = parseFloat(document.getElementById('supp-amount').value) || null;
+  const unit        = document.getElementById('supp-unit').value;
+
+  result.style.display = '';
+  body.innerHTML = '';
+  loading.style.display = 'flex';
+  btn.disabled = true;
+  result.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  try {
+    const res = await apiFetch('/api/supplement-check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nutrient, type_name: typeName, amount, unit }),
+    });
+
+    if (!res || !res.ok) throw new Error('Server error');
+    const data = await res.json();
+    body.innerHTML = marked.parse(data.response);
+
+  } catch (err) {
+    body.innerHTML = `<p style="color:var(--red-600)">Error: ${err.message}</p>`;
+  } finally {
+    loading.style.display = 'none';
+    btn.disabled = false;
   }
 }
 

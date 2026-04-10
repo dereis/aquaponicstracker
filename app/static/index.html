@@ -5,9 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Aquaponics Tracker</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 22'><path fill='%2322c55e' d='M9 0C4.5 2.5 1 8.5 1 14a8 8 0 0 0 16 0C17 8.5 13.5 2.5 9 0z'/><line x1='9' y1='7' x2='9' y2='21' stroke='white' stroke-width='1.5' stroke-linecap='round'/></svg>" />
-  <link rel="stylesheet" href="/static/styles.css?v=15" />
+  <link rel="stylesheet" href="/static/styles.css?v=23" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 </head>
 <body>
 
@@ -135,17 +136,11 @@
         <div class="ask-question-section" id="ask-question-section" style="display:none">
           <div class="ask-question-divider">Ask a question</div>
 
-          <!-- Mode toggle -->
-          <div class="ai-mode-toggle">
-            <button class="mode-btn active" data-mode="diagnose">🔍 Diagnose</button>
-            <button class="mode-btn" data-mode="recommend">💡 Recommend</button>
-          </div>
-
           <div class="ask-question-input">
             <textarea id="ai-query" rows="3"
-              placeholder="Describe symptoms or ask a question about your system..."></textarea>
+              placeholder="Describe symptoms, ask a question, or leave blank for a full system overview…"></textarea>
             <div class="ai-actions">
-              <button class="btn btn-primary" id="ai-submit-btn" onclick="submitAIQuery()">Get Analysis</button>
+              <button class="btn btn-primary" id="ai-submit-btn" onclick="submitAIQuery()">Get an answer</button>
               <div class="ai-loading" id="ai-loading" style="display:none">
                 <div class="spinner"></div>
                 <span>Consulting specialists...</span>
@@ -187,6 +182,12 @@
     <section class="tab-panel" id="tab-track">
       <div class="section-header">
         <h2>Log Data</h2>
+        <div class="history-controls">
+          <button class="history-action-btn" onclick="document.getElementById('excel-import-input').click()" title="Upload Excel file">
+            <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z" clip-rule="evenodd"/></svg>
+            Import
+          </button>
+        </div>
       </div>
 
       <div class="sub-tab-nav track-sub-nav">
@@ -352,8 +353,28 @@
           </div>
           <div class="form-actions">
             <button class="btn btn-primary" onclick="submitSupplement()">Log Addition</button>
+            <button class="btn btn-secondary" id="supp-check-btn" onclick="checkSupplementIssues()">
+              <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" style="vertical-align:-.1em;flex-shrink:0"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg>
+              Check for Issues
+            </button>
             <span class="save-status" id="supp-status"></span>
           </div>
+        </div>
+
+        <!-- Supplement safety check result -->
+        <div class="supp-check-result" id="supp-check-result" style="display:none">
+          <div class="supp-check-header">
+            <span class="supp-check-title">
+              <svg width="15" height="15" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
+              Supplement Safety Check
+            </span>
+            <button class="supp-check-close" onclick="document.getElementById('supp-check-result').style.display='none'">✕</button>
+          </div>
+          <div class="supp-check-loading" id="supp-check-loading" style="display:none">
+            <div class="spinner"></div>
+            <span>Analysing for potential issues…</span>
+          </div>
+          <div class="response-body" id="supp-check-body"></div>
         </div>
 
         <!-- Recent supplement log -->
@@ -375,32 +396,78 @@
             <option value="90">Last 90 days</option>
             <option value="0">All time</option>
           </select>
+          <button class="history-action-btn" onclick="exportToExcel()" title="Download as Excel">
+            <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+            Export
+          </button>
+          <button class="history-action-btn" onclick="document.getElementById('excel-import-input').click()" title="Upload Excel file">
+            <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z" clip-rule="evenodd"/></svg>
+            Import
+          </button>
+          <input type="file" id="excel-import-input" accept=".xlsx,.xls" style="display:none" onchange="importFromExcel(event)" />
         </div>
       </div>
 
-      <div class="table-wrap">
-        <table class="history-table" id="history-table">
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>pH</th>
-              <th>NH₃</th>
-              <th>NO₂</th>
-              <th>NO₃</th>
-              <th>DO</th>
-              <th>Temp</th>
-              <th>K</th>
-              <th>Ca</th>
-              <th>Mg</th>
-              <th>Fe</th>
-              <th>Plant Notes</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody id="history-tbody">
-            <tr><td colspan="12" class="empty-state">No entries yet</td></tr>
-          </tbody>
-        </table>
+      <!-- Readings History -->
+      <div class="history-section">
+        <button class="history-section-toggle" data-target="readings-history-body" aria-expanded="true">
+          <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" class="toggle-chevron"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+          Readings History
+        </button>
+        <div class="history-section-body" id="readings-history-body">
+          <div class="table-wrap">
+            <table class="history-table" id="history-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>pH</th>
+                  <th>NH₃</th>
+                  <th>NO₂</th>
+                  <th>NO₃</th>
+                  <th>DO</th>
+                  <th>Temp</th>
+                  <th>K</th>
+                  <th>Ca</th>
+                  <th>Mg</th>
+                  <th>Fe</th>
+                  <th>Plant Notes</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="history-tbody">
+                <tr><td colspan="13" class="empty-state">No entries yet</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Supplementation History -->
+      <div class="history-section">
+        <button class="history-section-toggle" data-target="supp-history-body" aria-expanded="true">
+          <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" class="toggle-chevron"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+          Supplementation History
+        </button>
+        <div class="history-section-body" id="supp-history-body">
+          <div class="table-wrap">
+            <table class="history-table" id="supp-history-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Nutrient</th>
+                  <th>Type</th>
+                  <th>Amount</th>
+                  <th>Unit</th>
+                  <th>Notes</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="supp-history-tbody">
+                <tr><td colspan="7" class="empty-state">No entries yet</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -523,8 +590,121 @@
     </div>
   </dialog>
 
+  <!-- Edit Supplement Modal -->
+  <dialog id="edit-supp-modal" class="edit-modal">
+    <div class="modal-header">
+      <h3>Edit Supplement Entry</h3>
+      <button type="button" class="modal-close" onclick="closeEditSuppModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="edit-supp-id" />
+      <div class="form-date-row">
+        <label>Date</label>
+        <input type="date" id="edit-supp-date" required />
+      </div>
+      <div class="form-grid" style="margin-top:.75rem">
+        <div class="form-group">
+          <label for="edit-supp-nutrient">Nutrient</label>
+          <select id="edit-supp-nutrient" onchange="loadEditSuppTypes(this.value)">
+            <option value="">Select nutrient…</option>
+            <option value="calcium">Calcium (Ca)</option>
+            <option value="iron">Iron (Fe)</option>
+            <option value="magnesium">Magnesium (Mg)</option>
+            <option value="micronutrients">Micronutrients</option>
+            <option value="ph_adjustment">pH Adjustment</option>
+            <option value="potassium">Potassium (K)</option>
+            <option value="water_change">Water Change</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="edit-supp-type">Type</label>
+          <select id="edit-supp-type" disabled>
+            <option value="">Select nutrient first…</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="edit-supp-amount">Amount</label>
+          <div class="supp-amount-unit">
+            <input type="number" id="edit-supp-amount" step="0.1" min="0" placeholder="0.0" />
+            <div class="supp-unit-divider"></div>
+            <select id="edit-supp-unit">
+              <option value="ppm">ppm</option>
+              <option value="%">%</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="form-group full-width" style="margin-top:.75rem">
+        <label for="edit-supp-notes">Notes <span class="label-optional">(optional)</span></label>
+        <textarea id="edit-supp-notes" rows="2"></textarea>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <span class="save-status" id="edit-supp-status"></span>
+      <button type="button" class="btn btn-secondary" onclick="closeEditSuppModal()">Cancel</button>
+      <button type="button" class="btn btn-primary" id="edit-supp-save-btn" onclick="saveEditSupp()">Save Changes</button>
+    </div>
+  </dialog>
+
+  <!-- Quick Log Modal (dashboard card click) -->
+  <dialog id="quick-log-modal" class="quick-log-modal">
+    <div class="modal-header">
+      <h3 id="ql-title">Log Entry</h3>
+      <button type="button" class="modal-close" onclick="closeQuickLog()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-date-row">
+        <label for="ql-date">Date</label>
+        <input type="date" id="ql-date" />
+      </div>
+      <div class="ql-tabs" id="ql-tabs" style="display:none">
+        <button class="ql-tab-btn active" data-qltab="reading" onclick="switchQuickLogTab('reading')">Reading</button>
+        <button class="ql-tab-btn" data-qltab="supplement" onclick="switchQuickLogTab('supplement')">Supplement</button>
+      </div>
+      <!-- Reading panel -->
+      <div id="ql-reading-panel">
+        <div class="form-group" style="margin-top:.75rem">
+          <label id="ql-param-label">Value</label>
+          <div class="input-with-unit">
+            <input type="number" id="ql-value" step="any" min="0" placeholder="Enter value…" />
+            <span class="form-unit" id="ql-unit">—</span>
+          </div>
+        </div>
+      </div>
+      <!-- Supplement panel -->
+      <div id="ql-supp-panel" style="display:none">
+        <div class="form-group" style="margin-top:.75rem">
+          <label for="ql-supp-type">Type</label>
+          <select id="ql-supp-type">
+            <option value="">Loading…</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="ql-supp-amount">Amount</label>
+          <div class="supp-amount-unit">
+            <input type="number" id="ql-supp-amount" step="0.1" min="0" placeholder="0.0" />
+            <div class="supp-unit-divider"></div>
+            <select id="ql-supp-unit">
+              <option value="ppm">ppm</option>
+              <option value="%">%</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="ql-supp-notes">Notes <span class="label-optional">(optional)</span></label>
+          <textarea id="ql-supp-notes" rows="2" placeholder="e.g. Added to sump tank"></textarea>
+        </div>
+      </div>
+      <p class="save-status" id="ql-status" style="margin-top:.5rem;min-height:1.2em"></p>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-secondary" onclick="closeQuickLog()">Cancel</button>
+      <button type="button" class="btn btn-primary" id="ql-save-btn" onclick="saveQuickLog()">Save</button>
+    </div>
+  </dialog>
+
   </div><!-- /app-shell -->
 
-  <script src="/static/app.js?v=15"></script>
+  <script src="/static/app.js?v=23"></script>
 </body>
 </html>
