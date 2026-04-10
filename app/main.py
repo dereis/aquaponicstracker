@@ -471,6 +471,7 @@ The authoritative ranges for this system are:
 - **Potassium (K)**: Target 10–40 ppm
 - **Calcium (Ca)**: Target 40–80 ppm
 - **Magnesium (Mg)**: Target 10–30 ppm
+- **K:Ca:Mg ratio**: Target 4:4:1
 
 **IMPORTANT:** Always use **ppm** (parts per million) as the unit for all nutrient and parameter values in your response. Never use mg/L.
 
@@ -878,7 +879,7 @@ Please analyse this planned addition (and the recent supplementation history) fo
 1. **Nutrient toxicity** — could this dose push any element to harmful levels given what's already been added recently?
 2. **Nutrient lockout** — could this addition interfere with the uptake of other nutrients (e.g. excess K competing with Ca/Mg)?
 3. **pH impact** — will this supplement meaningfully shift pH, and is that safe given current readings?
-4. **Nutrient imbalance** — does this affect the K:Ca:Mg balance or other important ratios?
+4. **Nutrient imbalance** — does this affect the K:Ca:Mg balance (target 4:4:1) or other important ratios?
 5. **Deficiency risk** — could adding this create or worsen a deficiency of another nutrient through antagonism?
 6. **Overall verdict** — is it safe to add now, should the dose be adjusted, or should it be postponed?
 
