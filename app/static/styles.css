@@ -1764,7 +1764,8 @@ body {
 }
 
 /* ── CMS ─────────────────────────────────────────────────── */
-#tab-cms { padding: 0; display: flex; flex-direction: column; height: calc(100vh - 64px); }
+#tab-cms { padding: 0; height: calc(100vh - 64px); }
+.tab-panel.active#tab-cms { display: flex; flex-direction: column; }
 
 .cms-toolbar {
   display: flex; align-items: center; justify-content: space-between;
