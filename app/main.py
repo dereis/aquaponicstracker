@@ -318,13 +318,6 @@ def init_db() -> None:
                     created_at     TEXT DEFAULT TO_CHAR(NOW(), 'YYYY-MM-DD HH24:MI:SS')
                 )
             """)
-            # Seed contacts if empty
-            cur.execute("SELECT COUNT(*) AS n FROM contacts")
-            if cur.fetchone()["n"] == 0:
-                cur.executemany(
-                    "INSERT INTO contacts (restaurant, chef_name, chef_title) VALUES (%s, %s, %s)",
-                    CONTACTS_SEED,
-                )
             # Remove old names superseded by the seed — idempotent, safe if already gone
             cur.execute(
                 "DELETE FROM supplement_types "
@@ -1644,6 +1637,12 @@ async def get_contacts(request: Request):
     require_auth(request)
     with get_db() as conn:
         with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) AS n FROM contacts")
+            if cur.fetchone()["n"] == 0:
+                cur.executemany(
+                    "INSERT INTO contacts (restaurant, chef_name, chef_title) VALUES (%s, %s, %s)",
+                    CONTACTS_SEED,
+                )
             cur.execute("SELECT * FROM contacts ORDER BY id ASC")
             return [dict(r) for r in cur.fetchall()]
 

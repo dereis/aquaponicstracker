@@ -1875,7 +1875,8 @@ const CMS_SELECT_OPTS = {
 let cmsContacts = [];
 let cmsFilteredIds = null;
 
-async function loadCmsContacts() {
+async function loadCmsContacts(force = false) {
+  if (!force && cmsContacts.length > 0) { renderCmsTable(); return; }
   const res = await apiFetch('/api/contacts');
   if (!res) return;
   cmsContacts = await res.json();
