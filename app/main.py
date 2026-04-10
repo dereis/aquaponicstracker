@@ -69,6 +69,111 @@ def get_db():
         conn.close()
 
 
+CONTACTS_SEED = [
+    ("Alo Restaurant",                "Patrick Kriss",         "Head Chef"),
+    ("Canoe",                         "Anthony Walsh",         "Head Chef"),
+    ("Actinolite",                    "Justin Cournoyer",      "Head Chef"),
+    ("Richmond Station",              "Carl Heinrich",         "Head Chef"),
+    ("George Restaurant",             "Lorenzo Loseto",        "Head Chef"),
+    ("Auberge du Pommier",            "Jason Bangerter",       "Head Chef"),
+    ("Buca King Street",              "Rob Gentile",           "Head Chef"),
+    ("Lee Restaurant",                "Susur Lee",             "Head Chef"),
+    ("DaiLo",                         "Nick Liu",              "Head Chef"),
+    ("Byblos Toronto",                "Stuart Cameron",        "Head Chef"),
+    ("The Chase",                     "Michael Steh",          "Head Chef"),
+    ("Edulis",                        "Michael Caballo",       "Head Chef"),
+    ("Scaramouche",                   "Keith Froggett",        "Head Chef"),
+    ("Bar Isabel",                    "Grant van Gameren",     "Head Chef"),
+    ("Campagnolo",                    "Craig Harding",         "Head Chef"),
+    ("Quetzal",                       "Craig Harding",         "Head Chef"),
+    ("Bymark",                        "Mark McEwan",           "Head Chef"),
+    ("One Restaurant",                "Mark McEwan",           "Head Chef"),
+    ("Bar Raval",                     "Grant van Gameren",     "Head Chef"),
+    ("Sushi Masaki Saito",            "Masaki Saito",          "Head Chef"),
+    ("Frilu",                         "John-Vincent Troiano",  "Head Chef"),
+    ("Tutti Matti",                   "Alida Solomon",         "Head Chef"),
+    ("Piano Piano",                   "Victor Barry",          "Head Chef"),
+    ("Bar Buca",                      "Rob Gentile",           "Head Chef"),
+    ("Buca Yorkville",                "Rob Gentile",           "Head Chef"),
+    ("Bent Restaurant",               "Susur Lee",             "Head Chef"),
+    ("Café Belong",                   "Tawnya Brant",          "Head Chef"),
+    ("Splendido",                     "Victor Barry",          "Head Chef"),
+    ("Harbour Sixty Steakhouse",      "",                      "Head Chef"),
+    ("Nobu Toronto",                  "",                      "Head Chef"),
+    ("Miku Toronto",                  "",                      "Head Chef"),
+    ("Jacobs & Co. Steakhouse",       "",                      "Head Chef"),
+    ("Café Boulud Toronto",           "",                      "Head Chef"),
+    ("Don Alfonso 1890 Toronto",      "",                      "Head Chef"),
+    ("Terroni (Adelaide)",            "",                      "Head Chef"),
+    ("Sotto Sotto",                   "",                      "Head Chef"),
+    ("Il Mulino Toronto",             "",                      "Head Chef"),
+    ("Sassafraz",                     "",                      "Head Chef"),
+    ("Patria",                        "",                      "Head Chef"),
+    ("Cluny Bistro & Bar",            "",                      "Head Chef"),
+    ("Biff's Bistro",                 "",                      "Head Chef"),
+    ("Jump Restaurant",               "",                      "Head Chef"),
+    ("Fabbrica",                      "",                      "Head Chef"),
+    ("Enoteca Sociale",               "",                      "Head Chef"),
+    ("Grey Gardens",                  "",                      "Head Chef"),
+    ("Canis Restaurant",              "",                      "Head Chef"),
+    ("Aloette",                       "",                      "Head Chef"),
+    ("Planta Queen",                  "",                      "Head Chef"),
+    ("Aburi Hana",                    "",                      "Head Chef"),
+    ("Cibo Wine Bar (King)",          "",                      "Head Chef"),
+    ("Lavelle",                       "",                      "Head Chef"),
+    ("Luma Restaurant",               "",                      "Head Chef"),
+    ("The Carbon Bar",                "",                      "Head Chef"),
+    ("Ki Modern Japanese + Bar",      "",                      "Head Chef"),
+    ("Marben",                        "",                      "Head Chef"),
+    ("La Palma",                      "",                      "Head Chef"),
+    ("Giulietta",                     "",                      "Head Chef"),
+    ("Osteria Giulia",                "",                      "Head Chef"),
+    ("Sud Forno",                     "",                      "Head Chef"),
+    ("Mercatto (King)",               "",                      "Head Chef"),
+    ("Farmhouse Tavern",              "",                      "Head Chef"),
+    ("Soho House Toronto",            "",                      "Head Chef"),
+    ("Momofuku Noodle Bar",           "",                      "Head Chef"),
+    ("The Broadview Hotel Restaurant","",                      "Head Chef"),
+    ("The Drake Hotel Restaurant",    "",                      "Head Chef"),
+    ("The Spoke Club",                "",                      "Head Chef"),
+    ("Catch & The Oyster Bar",        "",                      "Head Chef"),
+    ("Candelaria",                    "",                      "Head Chef"),
+    ("Archive Restaurant",            "",                      "Head Chef"),
+    ("Ufficio",                       "",                      "Head Chef"),
+    ("La Merceria",                   "",                      "Head Chef"),
+    ("Chantecler",                    "",                      "Head Chef"),
+    ("Le Sélect Bistro",              "",                      "Head Chef"),
+    ("Brassaii",                      "",                      "Head Chef"),
+    ("Labora",                        "",                      "Head Chef"),
+    ("R&D Restaurant",                "",                      "Head Chef"),
+    ("Colette Grand Café",            "",                      "Head Chef"),
+    ("Amano Trattoria",               "",                      "Head Chef"),
+    ("Noce",                          "",                      "Head Chef"),
+    ("Alma Restaurant",               "",                      "Head Chef"),
+    ("Bernhardt's Bar & Dining",      "",                      "Head Chef"),
+    ("Paese Ristorante",              "",                      "Head Chef"),
+    ("Porzia",                        "",                      "Head Chef"),
+    ("Katana Robata & Sushi Bar",     "",                      "Head Chef"),
+    ("Omakase by Fox",                "",                      "Head Chef"),
+    ("Skin + Bones",                  "",                      "Head Chef"),
+    ("Khao San Road",                 "",                      "Head Chef"),
+    ("Parts & Labour",                "",                      "Head Chef"),
+    ("The Good Fork",                 "",                      "Head Chef"),
+    ("Reds Midtown Bistro",           "",                      "Head Chef"),
+    ("Pai Northern Thai Kitchen",     "",                      "Head Chef"),
+    ("Acadia Restaurant",             "",                      "Head Chef"),
+    ("Woodlot Restaurant",            "",                      "Head Chef"),
+    ("Baro",                          "",                      "Head Chef"),
+    ("Figo",                          "",                      "Head Chef"),
+    ("Richmond Eatery",               "",                      "Head Chef"),
+    ("Mira Restaurant",               "",                      "Head Chef"),
+    ("Sakai Bar",                     "",                      "Head Chef"),
+    ("Spice Route",                   "",                      "Head Chef"),
+    ("Cibo Wine Bar (Yonge)",         "",                      "Head Chef"),
+    ("Byblos Express",                "",                      "Head Chef"),
+    ("Eataly Toronto",                "",                      "Head Chef"),
+]
+
 SUPPLEMENT_SEED = [
     # Potassium (K)
     ("potassium", "Potassium Sulfate (K\u2082SO\u2084)"),
@@ -199,6 +304,27 @@ def init_db() -> None:
                     value TEXT NOT NULL
                 )
             """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS contacts (
+                    id             SERIAL PRIMARY KEY,
+                    restaurant     TEXT,
+                    chef_name      TEXT,
+                    chef_title     TEXT DEFAULT 'Head Chef',
+                    phone          TEXT,
+                    email          TEXT,
+                    contact_method TEXT DEFAULT 'Phone Call',
+                    status         TEXT DEFAULT 'Not Contacted',
+                    notes          TEXT,
+                    created_at     TEXT DEFAULT TO_CHAR(NOW(), 'YYYY-MM-DD HH24:MI:SS')
+                )
+            """)
+            # Seed contacts if empty
+            cur.execute("SELECT COUNT(*) AS n FROM contacts")
+            if cur.fetchone()["n"] == 0:
+                cur.executemany(
+                    "INSERT INTO contacts (restaurant, chef_name, chef_title) VALUES (%s, %s, %s)",
+                    CONTACTS_SEED,
+                )
             # Remove old names superseded by the seed — idempotent, safe if already gone
             cur.execute(
                 "DELETE FROM supplement_types "
@@ -1492,6 +1618,78 @@ async def bulk_import(payload: BulkImportPayload):
         "supplements_added": supplements_added,
         "supplements_skipped": supplements_skipped,
     }
+
+
+# ---------------------------------------------------------------------------
+# CMS — Restaurant Contacts
+# ---------------------------------------------------------------------------
+
+_CONTACT_FIELDS = {"restaurant", "chef_name", "chef_title", "phone", "email",
+                   "contact_method", "status", "notes"}
+
+
+class ContactRow(BaseModel):
+    restaurant:     Optional[str] = None
+    chef_name:      Optional[str] = None
+    chef_title:     Optional[str] = None
+    phone:          Optional[str] = None
+    email:          Optional[str] = None
+    contact_method: Optional[str] = None
+    status:         Optional[str] = None
+    notes:          Optional[str] = None
+
+
+@app.get("/api/contacts")
+async def get_contacts(request: Request):
+    require_auth(request)
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM contacts ORDER BY id ASC")
+            return [dict(r) for r in cur.fetchall()]
+
+
+@app.post("/api/contacts")
+async def create_contact(req: ContactRow, request: Request):
+    require_auth(request)
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO contacts
+                   (restaurant, chef_name, chef_title, phone, email, contact_method, status, notes)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+                (req.restaurant or "", req.chef_name or "", req.chef_title or "Head Chef",
+                 req.phone or "", req.email or "",
+                 req.contact_method or "Phone Call", req.status or "Not Contacted",
+                 req.notes or ""),
+            )
+            row = cur.fetchone()
+    return {"id": row["id"]}
+
+
+@app.put("/api/contacts/{contact_id}")
+async def update_contact(contact_id: int, req: ContactRow, request: Request):
+    require_auth(request)
+    fields = {k: v for k, v in req.dict().items()
+              if k in _CONTACT_FIELDS and v is not None}
+    if not fields:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    set_clause = ", ".join(f"{k} = %s" for k in fields)
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"UPDATE contacts SET {set_clause} WHERE id = %s",
+                (*fields.values(), contact_id),
+            )
+    return {"ok": True}
+
+
+@app.delete("/api/contacts/{contact_id}")
+async def delete_contact(contact_id: int, request: Request):
+    require_auth(request)
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM contacts WHERE id = %s", (contact_id,))
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------

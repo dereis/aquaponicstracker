@@ -198,6 +198,8 @@ function switchTab(name) {
     loadHistory();
   } else if (name === 'learnings') {
     // learnings loaded on demand when saved sub-tab is clicked
+  } else if (name === 'cms') {
+    loadCmsContacts();
   } else if (name === 'admin') {
     loadAdminPanel();
   }
@@ -1843,6 +1845,211 @@ async function deleteAdminSupplementType(id) {
       alert('Error: ' + err.message);
     }
   });
+}
+
+// ── CMS ──────────────────────────────────────────────────────
+
+const CMS_STATUS_CFG = {
+  'Not Contacted':    { bg: '#f1f5f9', text: '#64748b', dot: '#94a3b8' },
+  'Contacted':        { bg: '#dbeafe', text: '#1d4ed8', dot: '#3b82f6' },
+  'In Progress':      { bg: '#fef3c7', text: '#b45309', dot: '#f59e0b' },
+  'Meeting Scheduled':{ bg: '#ede9fe', text: '#6d28d9', dot: '#8b5cf6' },
+  'Deal Closed':      { bg: '#dcfce7', text: '#15803d', dot: '#22c55e' },
+  'Not Interested':   { bg: '#fee2e2', text: '#dc2626', dot: '#f87171' },
+};
+
+const CMS_METHOD_CFG = {
+  'Phone Call': { bg: '#f0fdf4', text: '#15803d' },
+  'Email':      { bg: '#eff6ff', text: '#1d4ed8' },
+  'LinkedIn':   { bg: '#e0f2fe', text: '#0369a1' },
+  'Instagram':  { bg: '#fdf4ff', text: '#9333ea' },
+  'In Person':  { bg: '#fef3c7', text: '#b45309' },
+};
+
+const CMS_SELECT_OPTS = {
+  chef_title:     ['Head Chef', 'Sous Chef', 'Executive Chef', 'Pastry Chef'],
+  contact_method: ['Phone Call', 'Email', 'LinkedIn', 'Instagram', 'In Person'],
+  status:         ['Not Contacted', 'Contacted', 'In Progress', 'Meeting Scheduled', 'Deal Closed', 'Not Interested'],
+};
+
+let cmsContacts = [];
+let cmsFilteredIds = null;
+
+async function loadCmsContacts() {
+  const res = await apiFetch('/api/contacts');
+  if (!res) return;
+  cmsContacts = await res.json();
+  cmsFilteredIds = null;
+  document.getElementById('cms-search').value = '';
+  renderCmsTable();
+}
+
+function filterCmsTable() {
+  const q = document.getElementById('cms-search').value.trim().toLowerCase();
+  if (!q) {
+    cmsFilteredIds = null;
+  } else {
+    cmsFilteredIds = new Set(
+      cmsContacts
+        .filter(c =>
+          (c.restaurant || '').toLowerCase().includes(q) ||
+          (c.chef_name  || '').toLowerCase().includes(q) ||
+          (c.status     || '').toLowerCase().includes(q)
+        )
+        .map(c => c.id)
+    );
+  }
+  renderCmsTable();
+}
+
+function renderCmsTable() {
+  const visible = cmsFilteredIds
+    ? cmsContacts.filter(c => cmsFilteredIds.has(c.id))
+    : cmsContacts;
+
+  // Count label
+  document.getElementById('cms-count').textContent =
+    `${visible.length} of ${cmsContacts.length} restaurant${cmsContacts.length !== 1 ? 's' : ''}`;
+
+  // Status summary pills
+  const pills = document.getElementById('cms-status-pills');
+  const counts = {};
+  cmsContacts.forEach(c => { const s = c.status || 'Not Contacted'; counts[s] = (counts[s] || 0) + 1; });
+  pills.innerHTML = Object.entries(counts)
+    .filter(([, n]) => n > 0)
+    .map(([s, n]) => {
+      const cfg = CMS_STATUS_CFG[s] || { bg: '#f1f5f9', text: '#64748b' };
+      return `<span class="cms-status-pill" style="background:${cfg.bg};color:${cfg.text}">${s} <b>${n}</b></span>`;
+    }).join('');
+
+  document.getElementById('cms-tbody').innerHTML = visible.map(cmsRowHtml).join('');
+}
+
+function cmsEsc(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function cmsRowHtml(c) {
+  const sc = CMS_STATUS_CFG[c.status] || CMS_STATUS_CFG['Not Contacted'];
+  const mc = CMS_METHOD_CFG[c.contact_method] || { bg: '#f1f5f9', text: '#64748b' };
+  return `<tr class="cms-row" data-id="${c.id}">
+    <td class="cms-col-dot"><span class="cms-dot" style="background:${sc.dot}"></span></td>
+    <td class="cms-cell cms-cell-text" data-field="restaurant" data-id="${c.id}" onclick="cmsCellClick(this)">${cmsEsc(c.restaurant)}</td>
+    <td class="cms-cell cms-cell-text" data-field="chef_name"  data-id="${c.id}" onclick="cmsCellClick(this)">${cmsEsc(c.chef_name)}</td>
+    <td class="cms-cell cms-cell-sel"  data-field="chef_title" data-id="${c.id}" onclick="cmsCellClick(this)"><span class="cms-title-chip">${cmsEsc(c.chef_title || 'Head Chef')}</span></td>
+    <td class="cms-cell cms-cell-text" data-field="phone"      data-id="${c.id}" onclick="cmsCellClick(this)">${cmsEsc(c.phone)}</td>
+    <td class="cms-cell cms-cell-text" data-field="email"      data-id="${c.id}" onclick="cmsCellClick(this)">${cmsEsc(c.email)}</td>
+    <td class="cms-cell cms-cell-sel"  data-field="contact_method" data-id="${c.id}" onclick="cmsCellClick(this)"><span class="cms-badge" style="background:${mc.bg};color:${mc.text}">${cmsEsc(c.contact_method || 'Phone Call')}</span></td>
+    <td class="cms-cell cms-cell-sel"  data-field="status"     data-id="${c.id}" onclick="cmsCellClick(this)"><span class="cms-badge" style="background:${sc.bg};color:${sc.text}">${cmsEsc(c.status || 'Not Contacted')}</span></td>
+    <td class="cms-cell cms-cell-notes" data-field="notes"     data-id="${c.id}" onclick="cmsCellClick(this)">${cmsEsc(c.notes)}</td>
+    <td class="cms-col-del-cell"><button class="cms-del-btn" onclick="deleteCmsRow(${c.id})" title="Delete">✕</button></td>
+  </tr>`;
+}
+
+async function cmsCellClick(td) {
+  if (td.querySelector('input,select,textarea')) return;
+  const field = td.dataset.field;
+  const id    = parseInt(td.dataset.id);
+  const contact = cmsContacts.find(c => c.id === id);
+  if (!contact) return;
+
+  const current = String(contact[field] ?? '');
+  let el;
+
+  if (CMS_SELECT_OPTS[field]) {
+    el = document.createElement('select');
+    el.className = 'cms-inline-select';
+    CMS_SELECT_OPTS[field].forEach(opt => {
+      const o = document.createElement('option');
+      o.value = opt; o.textContent = opt;
+      if (opt === current) o.selected = true;
+      el.appendChild(o);
+    });
+  } else if (field === 'notes') {
+    el = document.createElement('textarea');
+    el.className = 'cms-inline-input';
+    el.value = current;
+    el.rows = 2;
+  } else {
+    el = document.createElement('input');
+    el.className = 'cms-inline-input';
+    el.type = field === 'email' ? 'email' : 'text';
+    el.value = current;
+  }
+
+  td.innerHTML = '';
+  td.appendChild(el);
+  el.focus();
+  if (el.tagName !== 'SELECT') { try { el.select(); } catch(e){} }
+
+  const save = async () => {
+    const value = el.value.trim !== undefined ? el.value.trim() : el.value;
+    contact[field] = value;
+    try {
+      await apiFetch(`/api/contacts/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [field]: value }),
+      });
+    } catch (e) { console.error('CMS save error', e); }
+    const row = document.querySelector(`.cms-row[data-id="${id}"]`);
+    if (row) row.outerHTML = cmsRowHtml(contact);
+    renderStatusPills();
+  };
+
+  el.addEventListener('blur', save);
+  el.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && el.tagName !== 'TEXTAREA') { e.preventDefault(); el.blur(); }
+    if (e.key === 'Escape') {
+      const row = document.querySelector(`.cms-row[data-id="${id}"]`);
+      if (row) row.outerHTML = cmsRowHtml(contact);
+    }
+  });
+  if (el.tagName === 'SELECT') el.addEventListener('change', () => el.blur());
+}
+
+function renderStatusPills() {
+  const pills = document.getElementById('cms-status-pills');
+  if (!pills) return;
+  const counts = {};
+  cmsContacts.forEach(c => { const s = c.status || 'Not Contacted'; counts[s] = (counts[s] || 0) + 1; });
+  pills.innerHTML = Object.entries(counts)
+    .filter(([, n]) => n > 0)
+    .map(([s, n]) => {
+      const cfg = CMS_STATUS_CFG[s] || { bg: '#f1f5f9', text: '#64748b' };
+      return `<span class="cms-status-pill" style="background:${cfg.bg};color:${cfg.text}">${s} <b>${n}</b></span>`;
+    }).join('');
+}
+
+async function addCmsRow() {
+  const res = await apiFetch('/api/contacts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ restaurant: '', chef_name: '', chef_title: 'Head Chef',
+                           status: 'Not Contacted', contact_method: 'Phone Call' }),
+  });
+  if (!res || !res.ok) return;
+  const { id } = await res.json();
+  const newContact = { id, restaurant: '', chef_name: '', chef_title: 'Head Chef',
+                       phone: '', email: '', contact_method: 'Phone Call',
+                       status: 'Not Contacted', notes: '' };
+  cmsContacts.push(newContact);
+  cmsFilteredIds = null;
+  document.getElementById('cms-search').value = '';
+  renderCmsTable();
+  // Auto-focus the restaurant cell of the new row
+  setTimeout(() => {
+    const row = document.querySelector(`.cms-row[data-id="${id}"]`);
+    if (row) row.querySelector('.cms-cell')?.click();
+  }, 30);
+}
+
+async function deleteCmsRow(id) {
+  if (!confirm('Delete this restaurant contact?')) return;
+  const res = await apiFetch(`/api/contacts/${id}`, { method: 'DELETE' });
+  if (!res || !res.ok) return;
+  cmsContacts = cmsContacts.filter(c => c.id !== id);
+  renderCmsTable();
 }
 
 // ── Init ────────────────────────────────────────────────────
