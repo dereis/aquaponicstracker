@@ -9,7 +9,6 @@ import json
 import os
 import re
 from contextlib import contextmanager
-from urllib.parse import urlparse, unquote
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -57,17 +56,9 @@ def get_db():
     raw_url = os.getenv("DATABASE_URL")
     if not raw_url:
         raise RuntimeError("DATABASE_URL environment variable is not set")
-    # Parse manually so percent-encoded characters in the password (e.g. %21 → !) are decoded
-    # before psycopg2 sees them — psycopg2 does not URL-decode connection string passwords.
-    p = urlparse(raw_url)
-    conn = psycopg2.connect(
-        host=p.hostname,
-        port=p.port or 5432,
-        dbname=p.path.lstrip("/"),
-        user=unquote(p.username or ""),
-        password=unquote(p.password or ""),
-        cursor_factory=psycopg2.extras.RealDictCursor,
-    )
+    # Pass the URL directly to psycopg2 — it uses libpq which handles special characters
+    # in passwords correctly without needing manual URL parsing.
+    conn = psycopg2.connect(raw_url, cursor_factory=psycopg2.extras.RealDictCursor)
     try:
         yield conn
         conn.commit()
