@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Aquaponics Tracker</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 22'><path fill='%2322c55e' d='M9 0C4.5 2.5 1 8.5 1 14a8 8 0 0 0 16 0C17 8.5 13.5 2.5 9 0z'/><line x1='9' y1='7' x2='9' y2='21' stroke='white' stroke-width='1.5' stroke-linecap='round'/></svg>" />
-  <link rel="stylesheet" href="/static/styles.css?v=10" />
+  <link rel="stylesheet" href="/static/styles.css?v=15" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
 </head>
@@ -82,7 +82,12 @@
         <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
         <button class="tab-btn" data-tab="history">History</button>
         <button class="tab-btn" data-tab="learnings">Learnings</button>
-        <button class="tab-btn" data-tab="admin">⚙ Admin</button>
+        <button class="tab-btn" data-tab="admin">
+          <svg width="15" height="15" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" style="vertical-align:-.15em;flex-shrink:0">
+            <path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 0 1-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 0 1 .947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 0 1 2.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 0 1 2.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 0 1 .947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 0 1-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 0 1-2.287-.947zM10 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" clip-rule="evenodd"/>
+          </svg>
+          Admin
+        </button>
       </nav>
       <button class="btn btn-primary nav-log-btn" onclick="switchTab('track')">+ Log Data</button>
     </div>
@@ -193,6 +198,10 @@
       <div class="track-sub-tab-panel" id="tracktab-readings">
 
       <form id="track-form" class="track-form">
+        <div class="form-date-row">
+          <label for="entry-date">Date</label>
+          <input type="date" id="entry-date" name="date" required />
+        </div>
 
         <h3 class="form-section-title">Water Parameters</h3>
         <div class="form-grid">
@@ -289,11 +298,6 @@
                     placeholder="Describe what you observe today: leaf color, any yellowing or spots, growth rate, fish behavior, anything unusual..."></textarea>
         </div>
 
-        <div class="form-date-row" style="margin-bottom:0">
-          <label for="entry-date">Date</label>
-          <input type="date" id="entry-date" name="date" required />
-        </div>
-
         <div class="form-actions">
           <button type="submit" class="btn btn-primary" id="save-btn">Save Entry</button>
           <span class="save-status" id="save-status"></span>
@@ -306,12 +310,28 @@
       <div class="track-sub-tab-panel" id="tracktab-supplements" style="display:none">
         <div class="card">
           <h3 class="form-section-title">Log Supplement Addition</h3>
-          <div class="form-grid supp-form-grid">
-            <div class="form-group" style="grid-column:1/-1">
-              <label for="supp-type">Supplement</label>
-              <select id="supp-type">
-                <option value="">Select supplement…</option>
-                <!-- populated by loadAllSupplementTypes() as optgroups -->
+          <div class="form-date-row">
+            <label for="supp-date">Date</label>
+            <input type="date" id="supp-date" />
+          </div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label for="supp-nutrient">Nutrient</label>
+              <select id="supp-nutrient" onchange="loadSupplementTypes(this.value)">
+                <option value="">Select nutrient…</option>
+                <option value="calcium">Calcium (Ca)</option>
+                <option value="iron">Iron (Fe)</option>
+                <option value="magnesium">Magnesium (Mg)</option>
+                <option value="micronutrients">Micronutrients</option>
+                <option value="ph_adjustment">pH Adjustment</option>
+                <option value="potassium">Potassium (K)</option>
+                <option value="water_change">Water Change</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="supp-type">Type</label>
+              <select id="supp-type" disabled>
+                <option value="">Select nutrient first…</option>
               </select>
             </div>
             <div class="form-group">
@@ -320,10 +340,7 @@
                 <input type="number" id="supp-amount" step="0.1" min="0" placeholder="0.0" />
                 <div class="supp-unit-divider"></div>
                 <select id="supp-unit">
-                  <option value="g">g</option>
-                  <option value="ml">ml</option>
-                  <option value="tsp">tsp</option>
-                  <option value="tbsp">tbsp</option>
+                  <option value="ppm">ppm</option>
                   <option value="%">%</option>
                 </select>
               </div>
@@ -332,10 +349,6 @@
           <div class="form-group full-width" style="margin-top:.75rem">
             <label for="supp-notes">Notes <span class="label-optional">(optional)</span></label>
             <textarea id="supp-notes" rows="2" placeholder="e.g. Added to sump tank after water test"></textarea>
-          </div>
-          <div class="form-date-row" style="margin-top:.875rem; margin-bottom:0">
-            <label for="supp-date">Date</label>
-            <input type="date" id="supp-date" />
           </div>
           <div class="form-actions">
             <button class="btn btn-primary" onclick="submitSupplement()">Log Addition</button>
@@ -512,6 +525,6 @@
 
   </div><!-- /app-shell -->
 
-  <script src="/static/app.js?v=10"></script>
+  <script src="/static/app.js?v=15"></script>
 </body>
 </html>

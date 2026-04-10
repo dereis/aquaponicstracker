@@ -84,12 +84,12 @@ let historyEntries = [];
 let appSettings = { visible_params: null }; // null = all visible (default until loaded)
 
 const NUTRIENT_LABELS = {
-  potassium:      'Potassium (K)',
   calcium:        'Calcium (Ca)',
-  magnesium:      'Magnesium (Mg)',
   iron:           'Iron (Fe)',
-  ph_adjustment:  'pH Adjustment',
+  magnesium:      'Magnesium (Mg)',
   micronutrients: 'Micronutrients',
+  ph_adjustment:  'pH Adjustment',
+  potassium:      'Potassium (K)',
   water_change:   'Water Change',
 };
 
@@ -224,7 +224,7 @@ function switchTrackSubTab(name) {
   document.querySelectorAll('.track-sub-tab-panel').forEach(p => {
     p.style.display = p.id === `tracktab-${name}` ? 'block' : 'none';
   });
-  if (name === 'supplements') { loadSupplementLog(); loadAllSupplementTypes(); }
+  if (name === 'supplements') loadSupplementLog();
 }
 
 document.querySelectorAll('.track-sub-tab-btn').forEach(btn => {
@@ -1018,63 +1018,50 @@ async function saveParamSetting(key, enabled) {
 
 // ── Supplements ─────────────────────────────────────────────
 
-function suppPlainName(key) {
-  return key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-}
-function suppStripPrefix(name, key) {
-  const prefix = suppPlainName(key).toLowerCase() + ' ';
-  return name.toLowerCase().startsWith(prefix) ? name.slice(suppPlainName(key).length + 1) : name;
-}
-
-async function loadAllSupplementTypes() {
+async function loadSupplementTypes(nutrientKey) {
   const typeSelect = document.getElementById('supp-type');
   typeSelect.innerHTML = '<option value="">Loading…</option>';
+  typeSelect.disabled = true;
+  if (!nutrientKey) {
+    typeSelect.innerHTML = '<option value="">Select nutrient first…</option>';
+    return;
+  }
   try {
-    const res = await apiFetch('/api/supplement-types');
+    const res = await apiFetch(`/api/supplement-types?nutrient_key=${nutrientKey}`);
     if (!res || !res.ok) {
-      typeSelect.innerHTML = '<option value="">Error loading supplements</option>';
+      typeSelect.innerHTML = '<option value="">Error loading types</option>';
       return;
     }
     const { types } = await res.json();
     if (!types || !types.length) {
-      typeSelect.innerHTML = '<option value="">No supplements available</option>';
+      typeSelect.innerHTML = '<option value="">No types available</option>';
       return;
     }
-    const groups = {};
-    Object.keys(NUTRIENT_LABELS).forEach(k => { groups[k] = []; });
-    types.forEach(t => { if (groups[t.nutrient_key]) groups[t.nutrient_key].push(t); });
+    const plainName = nutrientKey.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    const stripPrefix = name => {
+      const prefix = plainName.toLowerCase() + ' ';
+      return name.toLowerCase().startsWith(prefix) ? name.slice(plainName.length + 1) : name;
+    };
+    typeSelect.innerHTML = '<option value="">Select type…</option>' +
+      types.map(t => `<option value="${t.id}" data-nutrient="${nutrientKey}">${stripPrefix(t.name)}</option>`).join('');
+    typeSelect.disabled = false;
 
-    let html = '<option value="">Select supplement…</option>';
-    Object.entries(NUTRIENT_LABELS).forEach(([key, label]) => {
-      if (!groups[key] || !groups[key].length) return;
-      html += `<optgroup label="${label}">`;
-      groups[key].forEach(t => {
-        html += `<option value="${t.id}" data-nutrient="${key}">${suppStripPrefix(t.name, key)}</option>`;
-      });
-      html += '</optgroup>';
-    });
-    typeSelect.innerHTML = html;
+    const unitSelect  = document.getElementById('supp-unit');
+    const amountInput = document.getElementById('supp-amount');
+    if (nutrientKey === 'water_change') {
+      unitSelect.value = '%';
+      amountInput.placeholder = '0 – 100';
+      amountInput.max = '100';
+    } else {
+      unitSelect.value = 'ppm';
+      amountInput.placeholder = '0.0';
+      amountInput.removeAttribute('max');
+    }
   } catch (e) {
-    console.error('loadAllSupplementTypes error:', e);
-    typeSelect.innerHTML = '<option value="">Error loading supplements</option>';
+    console.error('loadSupplementTypes error:', e);
+    typeSelect.innerHTML = '<option value="">Error loading types</option>';
   }
 }
-
-document.getElementById('supp-type').addEventListener('change', function () {
-  const opt = this.selectedOptions[0];
-  const nutrientKey = opt ? opt.dataset.nutrient : '';
-  const unitSelect  = document.getElementById('supp-unit');
-  const amountInput = document.getElementById('supp-amount');
-  if (nutrientKey === 'water_change') {
-    unitSelect.value = '%';
-    amountInput.placeholder = '0 – 100';
-    amountInput.max = '100';
-  } else {
-    if (unitSelect.value === '%') unitSelect.value = 'g';
-    amountInput.placeholder = '0.0';
-    amountInput.removeAttribute('max');
-  }
-});
 
 async function submitSupplement() {
   const status = document.getElementById('supp-status');
@@ -1106,12 +1093,14 @@ async function submitSupplement() {
 
     status.textContent = '✓ Logged';
     status.style.color = 'var(--green-600)';
-    document.getElementById('supp-type').value = '';
+    document.getElementById('supp-nutrient').value = '';
+    document.getElementById('supp-type').innerHTML = '<option value="">Select nutrient first…</option>';
+    document.getElementById('supp-type').disabled = true;
     document.getElementById('supp-amount').value = '';
     document.getElementById('supp-notes').value = '';
     setTimeout(() => { status.textContent = ''; }, 2500);
     loadSupplementLog();
-    document.getElementById('supp-type').focus();
+    document.getElementById('supp-nutrient').focus();
   } catch (err) {
     status.textContent = '✗ Error: ' + err.message;
     status.style.color = 'var(--red-600)';
@@ -1181,7 +1170,50 @@ function renderAdminParams() {
         <span class="toggle-slider"></span>
       </label>
     </div>
-  `).join('');
+  `).join('') + `
+    <div id="add-param-form" class="add-type-form" style="display:none">
+      <input type="text" id="new-param-label" placeholder="Parameter name…" class="add-type-input" />
+      <input type="text" id="new-param-unit" placeholder="Unit (e.g. ppm)" class="add-type-input" style="max-width:7rem" />
+      <button class="btn btn-primary btn-sm" onclick="addCustomParam()">Save</button>
+      <button class="btn btn-secondary btn-sm" onclick="hideAddParamForm()">Cancel</button>
+    </div>
+    <button class="admin-add-btn" id="add-param-btn" onclick="showAddParamForm()">+ Add</button>
+  `;
+}
+
+function showAddParamForm() {
+  document.getElementById('add-param-form').style.display = 'flex';
+  document.getElementById('add-param-btn').style.display = 'none';
+  document.getElementById('new-param-label').focus();
+}
+
+function hideAddParamForm() {
+  document.getElementById('add-param-form').style.display = 'none';
+  document.getElementById('add-param-btn').style.display = '';
+  document.getElementById('new-param-label').value = '';
+  document.getElementById('new-param-unit').value = '';
+}
+
+async function addCustomParam() {
+  const label = document.getElementById('new-param-label').value.trim();
+  const unit  = document.getElementById('new-param-unit').value.trim();
+  if (!label) return;
+  const key = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+  if (PARAMS.find(p => p.key === key)) {
+    alert('A parameter with that name already exists.');
+    return;
+  }
+  PARAMS.push({ key, label, unit, good: null, warn: null, custom: true });
+  const vp = appSettings.visible_params || PARAMS.map(p => p.key);
+  if (!vp.includes(key)) vp.push(key);
+  appSettings.visible_params = vp;
+  await apiFetch('/api/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ settings: { visible_params: JSON.stringify(vp) } }),
+  });
+  hideAddParamForm();
+  renderAdminParams();
 }
 
 async function loadAdminSupplementTypes() {
@@ -1198,12 +1230,6 @@ async function loadAdminSupplementTypes() {
       <div class="admin-nutrient-group">
         <div class="admin-nutrient-header">
           <span class="admin-nutrient-label">${label}</span>
-          <button class="btn btn-secondary btn-sm" onclick="showAddTypeForm('${key}')">+ Add</button>
-        </div>
-        <div id="add-type-form-${key}" class="add-type-form" style="display:none">
-          <input type="text" id="new-type-name-${key}" placeholder="Type name…" class="add-type-input" />
-          <button class="btn btn-primary btn-sm" onclick="addSupplementType('${key}')">Save</button>
-          <button class="btn btn-secondary btn-sm" onclick="hideAddTypeForm('${key}')">Cancel</button>
         </div>
         ${groups[key].length ? groups[key].map(t => `
           <div class="admin-type-row">
@@ -1218,6 +1244,12 @@ async function loadAdminSupplementTypes() {
             </div>
           </div>
         `).join('') : '<p class="empty-hint" style="padding:.5rem 0 0">No types yet.</p>'}
+        <div id="add-type-form-${key}" class="add-type-form" style="display:none">
+          <input type="text" id="new-type-name-${key}" placeholder="Type name…" class="add-type-input" />
+          <button class="btn btn-primary btn-sm" onclick="addSupplementType('${key}')">Save</button>
+          <button class="btn btn-secondary btn-sm" onclick="hideAddTypeForm('${key}')">Cancel</button>
+        </div>
+        <button class="admin-add-btn" onclick="showAddTypeForm('${key}')">+ Add</button>
       </div>
     `).join('');
   } catch (err) {
@@ -1226,11 +1258,15 @@ async function loadAdminSupplementTypes() {
 }
 
 function showAddTypeForm(key) {
-  document.getElementById(`add-type-form-${key}`).style.display = 'flex';
+  const form = document.getElementById(`add-type-form-${key}`);
+  form.style.display = 'flex';
+  form.previousElementSibling.style.display = 'none'; // hide "+ Add" btn
   document.getElementById(`new-type-name-${key}`).focus();
 }
 function hideAddTypeForm(key) {
-  document.getElementById(`add-type-form-${key}`).style.display = 'none';
+  const form = document.getElementById(`add-type-form-${key}`);
+  form.style.display = 'none';
+  form.previousElementSibling.style.display = ''; // restore "+ Add" btn
   document.getElementById(`new-type-name-${key}`).value = '';
 }
 
@@ -1275,7 +1311,6 @@ async function deleteAdminSupplementType(id) {
 async function init() {
   await loadSettings();
   loadDashboard();
-  loadAllSupplementTypes();
 }
 
 // Entry point — check auth before showing app

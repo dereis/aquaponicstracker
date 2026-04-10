@@ -514,7 +514,7 @@ body {
 /* Amount + Unit inline pair inside supplements */
 .supp-amount-unit {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 1fr 1px auto;
   gap: 0;
   border: 1px solid var(--slate-200);
   border-radius: 8px;
@@ -1331,6 +1331,29 @@ body {
   align-items: center;
   justify-content: space-between;
   margin-bottom: .5rem;
+}
+
+.admin-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  margin-top: .5rem;
+  padding: .3rem .75rem;
+  border: 1.5px dashed var(--slate-300);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--slate-500);
+  font-size: .8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color .15s, color .15s, background .15s;
+  width: 100%;
+  justify-content: center;
+}
+.admin-add-btn:hover {
+  border-color: var(--green-500);
+  color: var(--green-600);
+  background: var(--green-50);
 }
 .admin-nutrient-label {
   font-size: .9rem;

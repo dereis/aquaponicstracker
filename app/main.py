@@ -9,6 +9,7 @@ import json
 import os
 import re
 from contextlib import contextmanager
+from urllib.parse import urlparse, unquote
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -53,10 +54,20 @@ USER_JSONL_DIR = Path(_user_knowledge_env) if _user_knowledge_env else None
 @contextmanager
 def get_db():
     """Context manager that yields a psycopg2 connection and handles commit/rollback/close."""
-    url = os.getenv("DATABASE_URL")
-    if not url:
+    raw_url = os.getenv("DATABASE_URL")
+    if not raw_url:
         raise RuntimeError("DATABASE_URL environment variable is not set")
-    conn = psycopg2.connect(url, cursor_factory=psycopg2.extras.RealDictCursor)
+    # Parse manually so percent-encoded characters in the password (e.g. %21 → !) are decoded
+    # before psycopg2 sees them — psycopg2 does not URL-decode connection string passwords.
+    p = urlparse(raw_url)
+    conn = psycopg2.connect(
+        host=p.hostname,
+        port=p.port or 5432,
+        dbname=p.path.lstrip("/"),
+        user=unquote(p.username or ""),
+        password=unquote(p.password or ""),
+        cursor_factory=psycopg2.extras.RealDictCursor,
+    )
     try:
         yield conn
         conn.commit()
@@ -107,7 +118,7 @@ SUPPLEMENT_SEED = [
     ("micronutrients", "Copper Sulfate (CuSO\u2084) — use sparingly"),
     ("micronutrients", "Sodium Molybdate (Molybdenum)"),
     # Water Change
-    ("water_change", "Distilled Water"),
+    ("water_change", "RO Water"),
     ("water_change", "Toronto Water (Municipal)"),
 ]
 
@@ -197,6 +208,11 @@ def init_db() -> None:
                     value TEXT NOT NULL
                 )
             """)
+            # Remove old names superseded by the seed — idempotent, safe if already gone
+            cur.execute(
+                "DELETE FROM supplement_types "
+                "WHERE nutrient_key = 'water_change' AND name = 'Distilled Water'"
+            )
             # Seed supplement types — safe to re-run, skips existing
             cur.executemany(
                 "INSERT INTO supplement_types (nutrient_key, name) VALUES (%s, %s) "
@@ -1080,7 +1096,7 @@ async def get_supplement_types(nutrient_key: str = "", include_disabled: bool = 
             if not include_disabled:
                 clauses.append("enabled = TRUE")
             where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-            cur.execute(f"SELECT * FROM supplement_types {where} ORDER BY id ASC", params)
+            cur.execute(f"SELECT * FROM supplement_types {where} ORDER BY name ASC", params)
             return {"types": [dict(r) for r in cur.fetchall()]}
 
 
