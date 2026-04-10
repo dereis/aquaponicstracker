@@ -3,6 +3,8 @@ Aquaponics Nutrient Tracker — FastAPI Backend
 """
 
 import asyncio
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -15,12 +17,23 @@ import anthropic
 import psycopg2
 import psycopg2.extras
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 load_dotenv()
+
+# ---------------------------------------------------------------------------
+# Auth
+# ---------------------------------------------------------------------------
+
+AUTH_EMAIL  = os.getenv("AUTH_EMAIL", "").strip().lower()
+AUTH_PASSWORD = os.getenv("AUTH_PASSWORD", "").strip()
+_auth_secret = os.getenv("AUTH_SECRET", "fallback-secret-please-set-env").encode()
+
+# Derive a stable session token from the secret so it survives server restarts
+SESSION_TOKEN = hmac.new(_auth_secret, b"aquaponics-session-v1", hashlib.sha256).hexdigest()
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -52,6 +65,60 @@ def get_db():
         raise
     finally:
         conn.close()
+
+
+SUPPLEMENT_SEED = [
+    # Potassium (K)
+    ("potassium", "Potassium Sulfate (K\u2082SO\u2084)"),
+    ("potassium", "Potassium Chloride (KCl)"),
+    ("potassium", "Potassium Bicarbonate (KHCO\u2083)"),
+    ("potassium", "Potassium Citrate"),
+    ("potassium", "Potassium Nitrate (KNO\u2083)"),
+    ("potassium", "Potassium Silicate"),
+    ("potassium", "Potassium Hydroxide (KOH)"),
+    # Calcium (Ca)
+    ("calcium",   "Calcium Carbonate (CaCO\u2083) — Limestone"),
+    ("calcium",   "Calcium Chloride (CaCl\u2082)"),
+    ("calcium",   "Calcium Nitrate Ca(NO\u2083)\u2082"),
+    ("calcium",   "Calcium Hydroxide (Ca(OH)\u2082) — Lime"),
+    ("calcium",   "Gypsum (CaSO\u2084) — pH neutral"),
+    # Magnesium (Mg)
+    ("magnesium", "Magnesium Sulfate — Epsom Salt (MgSO\u2084)"),
+    ("magnesium", "Magnesium Chloride (MgCl\u2082)"),
+    ("magnesium", "Magnesium Carbonate (MgCO\u2083)"),
+    # Iron (Fe)
+    ("iron",      "Chelated Iron EDDHA — best for high pH"),
+    ("iron",      "Chelated Iron DTPA — works to pH 7.5"),
+    ("iron",      "Chelated Iron EDTA — works to pH 6.5"),
+    ("iron",      "Iron Sulfate (FeSO\u2084)"),
+    # pH Adjustment
+    ("ph_adjustment", "Potassium Hydroxide (pH Up — strong)"),
+    ("ph_adjustment", "Potassium Bicarbonate (pH Up — gentle)"),
+    ("ph_adjustment", "Calcium Hydroxide (pH Up)"),
+    ("ph_adjustment", "Phosphoric Acid (pH Down)"),
+    ("ph_adjustment", "Citric Acid (pH Down — gentle)"),
+    ("ph_adjustment", "Hydrochloric Acid (pH Down — strong)"),
+    # Micronutrients
+    ("micronutrients", "Seaweed Extract"),
+    ("micronutrients", "Trace Element Mix"),
+    ("micronutrients", "Manganese Sulfate (MnSO\u2084)"),
+    ("micronutrients", "Zinc Sulfate (ZnSO\u2084)"),
+    ("micronutrients", "Boric Acid (Boron)"),
+    ("micronutrients", "Copper Sulfate (CuSO\u2084) — use sparingly"),
+    ("micronutrients", "Sodium Molybdate (Molybdenum)"),
+    # Water Change
+    ("water_change", "Distilled Water"),
+    ("water_change", "Toronto Water (Municipal)"),
+]
+
+DEFAULT_SETTINGS = {
+    "visible_params": '["ph","ammonia","nitrite","nitrate","dissolved_oxygen","temperature","potassium","calcium","magnesium","iron"]',
+}
+
+ALL_PARAM_KEYS = [
+    "ph", "ammonia", "nitrite", "nitrate", "dissolved_oxygen",
+    "temperature", "potassium", "calcium", "magnesium", "iron",
+]
 
 
 def init_db() -> None:
@@ -91,6 +158,57 @@ def init_db() -> None:
                     data_hash    TEXT
                 )
             """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS supplement_types (
+                    id           SERIAL PRIMARY KEY,
+                    nutrient_key TEXT NOT NULL,
+                    name         TEXT NOT NULL,
+                    enabled      BOOLEAN DEFAULT TRUE,
+                    UNIQUE (nutrient_key, name)
+                )
+            """)
+            # Add unique constraint to existing tables that predate it
+            cur.execute("""
+                DO $$ BEGIN
+                  IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint
+                    WHERE conname = 'supplement_types_nutrient_key_name_key'
+                  ) THEN
+                    ALTER TABLE supplement_types
+                      ADD CONSTRAINT supplement_types_nutrient_key_name_key
+                      UNIQUE (nutrient_key, name);
+                  END IF;
+                END $$
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS supplement_log (
+                    id                 SERIAL PRIMARY KEY,
+                    date               TEXT NOT NULL,
+                    supplement_type_id INTEGER REFERENCES supplement_types(id) ON DELETE SET NULL,
+                    amount             REAL NOT NULL,
+                    unit               TEXT DEFAULT 'g',
+                    notes              TEXT,
+                    created_at         TEXT DEFAULT TO_CHAR(NOW(), 'YYYY-MM-DD HH24:MI:SS')
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS app_settings (
+                    key   TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                )
+            """)
+            # Seed supplement types — safe to re-run, skips existing
+            cur.executemany(
+                "INSERT INTO supplement_types (nutrient_key, name) VALUES (%s, %s) "
+                "ON CONFLICT (nutrient_key, name) DO NOTHING",
+                SUPPLEMENT_SEED,
+            )
+            # Seed default settings
+            for key, value in DEFAULT_SETTINGS.items():
+                cur.execute(
+                    "INSERT INTO app_settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
+                    (key, value),
+                )
 
 
 def _date_cutoff(days: int) -> str:
@@ -220,12 +338,12 @@ FIELD_LABELS = {
     "ammonia": ("Ammonia", "ppm"),
     "nitrite": ("Nitrite", "ppm"),
     "nitrate": ("Nitrate", "ppm"),
-    "dissolved_oxygen": ("Dissolved Oxygen", "mg/L"),
+    "dissolved_oxygen": ("Dissolved Oxygen", "ppm"),
     "temperature": ("Temperature", "°C"),
-    "potassium": ("Potassium (K)", "mg/L"),
-    "calcium": ("Calcium (Ca)", "mg/L"),
-    "magnesium": ("Magnesium (Mg)", "mg/L"),
-    "iron": ("Iron (Fe)", "mg/L"),
+    "potassium": ("Potassium (K)", "ppm"),
+    "calcium": ("Calcium (Ca)", "ppm"),
+    "magnesium": ("Magnesium (Mg)", "ppm"),
+    "iron": ("Iron (Fe)", "ppm"),
 }
 
 
@@ -303,12 +421,14 @@ The authoritative ranges for this system are:
 - **Ammonia**: Target < 0.5 ppm
 - **Nitrite**: Target < 0.5 ppm
 - **Nitrate**: Optimal 20–100 ppm
-- **Dissolved Oxygen**: Target 6–8 mg/L
+- **Dissolved Oxygen**: Target 6–8 ppm
 - **Temperature**: Optimal 22–28°C
-- **Iron (Fe)**: Target 2–4 mg/L (chelated)
-- **Potassium (K)**: Target 10–40 mg/L
-- **Calcium (Ca)**: Target 40–80 mg/L
-- **Magnesium (Mg)**: Target 10–30 mg/L
+- **Iron (Fe)**: Target 2–4 ppm (chelated)
+- **Potassium (K)**: Target 10–40 ppm
+- **Calcium (Ca)**: Target 40–80 ppm
+- **Magnesium (Mg)**: Target 10–30 ppm
+
+**IMPORTANT:** Always use **ppm** (parts per million) as the unit for all nutrient and parameter values in your response. Never use mg/L.
 
 Do not cite general hydroponics targets (e.g. K ≥150 ppm, Ca ≥150 ppm) — those are for recirculating hydroponic systems, not aquaponics. If a measured value falls within the aquaponics target range above, it is acceptable; do not flag it as deficient using non-aquaponics benchmarks.
 
@@ -393,6 +513,18 @@ def call_claude(system_content: str, user_message: str) -> tuple[str, int]:
 
 app = FastAPI(title="Aquaponics Nutrient Tracker", version="1.0.0")
 
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    """Protect all /api/ routes with bearer token auth."""
+    if request.url.path.startswith("/api/"):
+        auth = request.headers.get("Authorization", "")
+        token = auth.removeprefix("Bearer ").strip()
+        if not hmac.compare_digest(token, SESSION_TOKEN):
+            return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+    return await call_next(request)
+
+
 init_db()
 CURATED_KNOWLEDGE = load_curated_knowledge()
 
@@ -434,6 +566,55 @@ class LearningEntry(BaseModel):
 class ConsultRequest(BaseModel):
     query: str = ""
     mode: str = "diagnose"  # "diagnose" | "recommend"
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class SupplementLogEntry(BaseModel):
+    date: str
+    supplement_type_id: int
+    amount: float
+    unit: str = "g"
+    notes: Optional[str] = None
+
+
+class SupplementTypeIn(BaseModel):
+    nutrient_key: str
+    name: str
+
+
+class SettingsPayload(BaseModel):
+    settings: dict
+
+
+class SupplementTypeUpdate(BaseModel):
+    enabled: Optional[bool] = None
+    name: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Auth routes  (public — not protected by middleware)
+# ---------------------------------------------------------------------------
+
+@app.post("/auth/login")
+async def login(body: LoginRequest):
+    email_match    = body.email.strip().lower() == AUTH_EMAIL
+    password_match = hmac.compare_digest(body.password, AUTH_PASSWORD)
+    if not (email_match and password_match):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    return {"token": SESSION_TOKEN}
+
+
+@app.get("/auth/check")
+async def check_auth(request: Request):
+    auth  = request.headers.get("Authorization", "")
+    token = auth.removeprefix("Bearer ").strip()
+    if not hmac.compare_digest(token, SESSION_TOKEN):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------
@@ -853,6 +1034,138 @@ async def get_insights(generate: bool = True):
     text, _ = await asyncio.to_thread(call_claude, build_insights_system(), full_input)
     _save_insights(text, current_hash)
     return {"insights": text, "updated_at": datetime.now().isoformat()}
+
+
+# ---------------------------------------------------------------------------
+# Settings routes
+# ---------------------------------------------------------------------------
+
+@app.get("/api/settings")
+async def get_settings():
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT key, value FROM app_settings")
+            return {"settings": {r["key"]: r["value"] for r in cur.fetchall()}}
+
+
+@app.put("/api/settings")
+async def update_settings(payload: SettingsPayload):
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            for key, value in payload.settings.items():
+                cur.execute(
+                    "INSERT INTO app_settings (key, value) VALUES (%s, %s) "
+                    "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+                    (key, str(value)),
+                )
+    return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# Supplement types routes
+# ---------------------------------------------------------------------------
+
+NUTRIENT_ORDER = ["potassium", "calcium", "magnesium", "iron", "ph_adjustment", "micronutrients", "water_change"]
+
+
+@app.get("/api/supplement-types")
+async def get_supplement_types(nutrient_key: str = "", include_disabled: bool = False):
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            clauses = []
+            params: list = []
+            if nutrient_key:
+                clauses.append("nutrient_key = %s")
+                params.append(nutrient_key)
+            if not include_disabled:
+                clauses.append("enabled = TRUE")
+            where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+            cur.execute(f"SELECT * FROM supplement_types {where} ORDER BY id ASC", params)
+            return {"types": [dict(r) for r in cur.fetchall()]}
+
+
+@app.post("/api/supplement-types")
+async def create_supplement_type(body: SupplementTypeIn):
+    if body.nutrient_key not in NUTRIENT_ORDER:
+        raise HTTPException(400, detail="Invalid nutrient_key")
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO supplement_types (nutrient_key, name) VALUES (%s, %s) RETURNING id",
+                (body.nutrient_key, body.name.strip()),
+            )
+            new_id = cur.fetchone()["id"]
+    return {"status": "ok", "id": new_id}
+
+
+@app.put("/api/supplement-types/{type_id}")
+async def update_supplement_type(type_id: int, body: SupplementTypeUpdate):
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            if body.enabled is not None:
+                cur.execute(
+                    "UPDATE supplement_types SET enabled = %s WHERE id = %s",
+                    (body.enabled, type_id),
+                )
+            if body.name is not None:
+                cur.execute(
+                    "UPDATE supplement_types SET name = %s WHERE id = %s",
+                    (body.name.strip(), type_id),
+                )
+    return {"status": "ok"}
+
+
+@app.delete("/api/supplement-types/{type_id}")
+async def delete_supplement_type(type_id: int):
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM supplement_types WHERE id = %s", (type_id,))
+            if cur.rowcount == 0:
+                raise HTTPException(404, detail="Type not found")
+    return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# Supplement log routes
+# ---------------------------------------------------------------------------
+
+@app.post("/api/supplements")
+async def log_supplement(entry: SupplementLogEntry):
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO supplement_log (date, supplement_type_id, amount, unit, notes)
+                   VALUES (%s, %s, %s, %s, %s)""",
+                (entry.date, entry.supplement_type_id, entry.amount, entry.unit, entry.notes),
+            )
+    return {"status": "ok"}
+
+
+@app.get("/api/supplements")
+async def get_supplement_log(days: int = 30):
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cutoff = _date_cutoff(days) if days > 0 else "1970-01-01"
+            cur.execute(
+                """SELECT sl.*, st.name AS type_name, st.nutrient_key
+                   FROM supplement_log sl
+                   LEFT JOIN supplement_types st ON sl.supplement_type_id = st.id
+                   WHERE sl.date >= %s
+                   ORDER BY sl.date DESC, sl.created_at DESC
+                   LIMIT 100""",
+                (cutoff,),
+            )
+            return {"entries": [dict(r) for r in cur.fetchall()]}
+
+
+@app.delete("/api/supplements/{entry_id}")
+async def delete_supplement_log(entry_id: int):
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM supplement_log WHERE id = %s", (entry_id,))
+            if cur.rowcount == 0:
+                raise HTTPException(404, detail="Entry not found")
+    return {"status": "ok"}
 
 
 # ---------------------------------------------------------------------------

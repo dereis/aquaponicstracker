@@ -4,11 +4,94 @@
 
 'use strict';
 
+// ── Auth ───────────────────────────────────────────────────
+const TOKEN_KEY = 'aqp_token';
+
+function getToken() { return localStorage.getItem(TOKEN_KEY); }
+
+function clearAuth() {
+  localStorage.removeItem(TOKEN_KEY);
+  document.getElementById('app-shell').style.display = 'none';
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('login-error').style.display = 'none';
+  document.getElementById('login-email').value = '';
+  document.getElementById('login-password').value = '';
+}
+
+async function submitLogin() {
+  const email    = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+  const errEl    = document.getElementById('login-error');
+  const btn      = document.getElementById('login-btn');
+
+  errEl.style.display = 'none';
+  btn.disabled = true;
+  btn.textContent = 'Signing in…';
+
+  try {
+    const res = await fetch('/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.detail || 'Invalid email or password');
+    }
+    const { token } = await res.json();
+    localStorage.setItem(TOKEN_KEY, token);
+    showApp();
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Sign in';
+  }
+}
+
+function showApp() {
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app-shell').style.display = 'block';
+  init();
+}
+
+async function checkAuthAndLoad() {
+  const token = getToken();
+  if (!token) { clearAuth(); return; }
+  try {
+    const res = await fetch('/auth/check', {
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    if (res.ok) { showApp(); } else { clearAuth(); }
+  } catch { clearAuth(); }
+}
+
+// Authenticated fetch wrapper — injects token and handles 401
+async function apiFetch(url, options = {}) {
+  const token = getToken();
+  const headers = { ...(options.headers || {}), 'Authorization': `Bearer ${token}` };
+  const res = await fetch(url, { ...options, headers });
+  if (res.status === 401) { clearAuth(); return null; }
+  return res;
+}
+
 // ── State ──────────────────────────────────────────────────
 let currentTab = 'dashboard';
 let currentMode = 'diagnose'; // 'diagnose' | 'recommend'
 let trendChart = null;
 let historyEntries = [];
+let appSettings = { visible_params: null }; // null = all visible (default until loaded)
+
+const NUTRIENT_LABELS = {
+  potassium:      'Potassium (K)',
+  calcium:        'Calcium (Ca)',
+  magnesium:      'Magnesium (Mg)',
+  iron:           'Iron (Fe)',
+  ph_adjustment:  'pH Adjustment',
+  micronutrients: 'Micronutrients',
+  water_change:   'Water Change',
+};
 
 // ── Parameter metadata ──────────────────────────────────────
 const PARAMS = [
@@ -98,10 +181,13 @@ function switchTab(name) {
     loadDashboard();
   } else if (name === 'track') {
     document.getElementById('entry-date').value = localDateString();
+    document.getElementById('supp-date').value = localDateString();
   } else if (name === 'history') {
     loadHistory();
   } else if (name === 'learnings') {
     // learnings loaded on demand when saved sub-tab is clicked
+  } else if (name === 'admin') {
+    loadAdminPanel();
   }
 }
 
@@ -130,12 +216,32 @@ document.querySelectorAll('.sub-tab-panel').forEach((p, i) => {
   p.style.display = i === 0 ? 'block' : 'none';
 });
 
+// ── Track sub-tabs (Readings / Supplements) ────────────────
+function switchTrackSubTab(name) {
+  document.querySelectorAll('.track-sub-tab-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.tracktab === name);
+  });
+  document.querySelectorAll('.track-sub-tab-panel').forEach(p => {
+    p.style.display = p.id === `tracktab-${name}` ? 'block' : 'none';
+  });
+  if (name === 'supplements') { loadSupplementLog(); loadAllSupplementTypes(); }
+}
+
+document.querySelectorAll('.track-sub-tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => switchTrackSubTab(btn.dataset.tracktab));
+});
+
+// initialise track sub-tab panels on load
+document.querySelectorAll('.track-sub-tab-panel').forEach((p, i) => {
+  p.style.display = i === 0 ? 'block' : 'none';
+});
+
 // ── Dashboard ──────────────────────────────────────────────
 async function loadDashboard() {
   try {
     const [latestRes, histRes] = await Promise.all([
-      fetch('/api/latest'),
-      fetch('/api/history?days=30')
+      apiFetch('/api/latest'),
+      apiFetch('/api/history?days=30')
     ]);
     const { entry } = await latestRes.json();
     const { entries } = await histRes.json();
@@ -243,7 +349,7 @@ function showInsightsCTA() {
 
 async function loadCachedInsights() {
   try {
-    const res  = await fetch('/api/insights?generate=false');
+    const res  = await apiFetch('/api/insights?generate=false');
     const data = await res.json();
     if (data.insights) showInsightsResult(data);
     else showInsightsCTA();
@@ -259,7 +365,7 @@ async function generateInsights() {
   regen.style.display = 'none';
 
   try {
-    const res  = await fetch('/api/insights');
+    const res  = await apiFetch('/api/insights');
     const data = await res.json();
     if (data.insights) showInsightsResult(data);
     else {
@@ -270,15 +376,29 @@ async function generateInsights() {
   }
 }
 
+function visibleParams() {
+  const vp = appSettings.visible_params;
+  if (!vp || !vp.length) return PARAMS;
+  return PARAMS.filter(p => vp.includes(p.key));
+}
+
+function applyParamVisibility() {
+  const vp = appSettings.visible_params;
+  if (!vp) return;
+  document.querySelectorAll('[data-param]').forEach(el => {
+    el.style.display = vp.includes(el.dataset.param) ? '' : 'none';
+  });
+}
+
 function renderParamCards(entry) {
   const grid = document.getElementById('param-grid');
   grid.innerHTML = '';
 
-  PARAMS.forEach(p => {
+  visibleParams().forEach(p => {
     const value = entry ? entry[p.key] : null;
     const status = getStatus(p, value);
     const displayVal = value !== null && value !== undefined
-      ? fmt(value, p.key === 'ph' ? 2 : p.key === 'temperature' ? 1 : 2)
+      ? fmt(value, p.key === 'ph' ? 1 : 0)
       : '—';
 
     const card = document.createElement('div');
@@ -396,24 +516,25 @@ document.getElementById('track-form').addEventListener('submit', async e => {
   status.textContent = '';
 
   const form = e.target;
+  const n = v => v.trim() === '' ? null : parseFloat(v);
   const payload = {
     date: form.date.value,
-    ph: parseFloat(form.ph.value) || null,
-    ammonia: parseFloat(form.ammonia.value) || null,
-    nitrite: parseFloat(form.nitrite.value) || null,
-    nitrate: parseFloat(form.nitrate.value) || null,
-    dissolved_oxygen: parseFloat(form.dissolved_oxygen.value) || null,
-    temperature: parseFloat(form.temperature.value) || null,
-    potassium: parseFloat(form.potassium.value) || null,
-    calcium: parseFloat(form.calcium.value) || null,
-    magnesium: parseFloat(form.magnesium.value) || null,
-    iron: parseFloat(form.iron.value) || null,
+    ph: n(form.ph.value),
+    ammonia: n(form.ammonia.value),
+    nitrite: n(form.nitrite.value),
+    nitrate: n(form.nitrate.value),
+    dissolved_oxygen: n(form.dissolved_oxygen.value),
+    temperature: n(form.temperature.value),
+    potassium: n(form.potassium.value),
+    calcium: n(form.calcium.value),
+    magnesium: n(form.magnesium.value),
+    iron: n(form.iron.value),
     plant_notes: form.plant_notes.value.trim() || null,
   };
 
   // Remove null numerics (leave as null for optional fields)
   try {
-    const res = await fetch('/api/track', {
+    const res = await apiFetch('/api/track', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -421,6 +542,8 @@ document.getElementById('track-form').addEventListener('submit', async e => {
 
     if (!res.ok) throw new Error(await res.text());
 
+    btn.textContent = '✓ Saved';
+    await new Promise(r => setTimeout(r, 700));
     switchTab('dashboard');
 
   } catch (err) {
@@ -430,6 +553,22 @@ document.getElementById('track-form').addEventListener('submit', async e => {
     btn.disabled = false;
     btn.textContent = 'Save Entry';
   }
+});
+
+// ── Inline range feedback on reading inputs ─────────────────
+PARAMS.forEach(param => {
+  const group = document.querySelector(`[data-param="${param.key}"]`);
+  if (!group) return;
+  const input = group.querySelector('input');
+  if (!input) return;
+  input.addEventListener('input', () => {
+    group.classList.remove('field-good', 'field-warn', 'field-alert');
+    const v = input.value === '' ? null : parseFloat(input.value);
+    if (v !== null && !isNaN(v)) {
+      const s = getStatus(param, v);
+      if (s !== 'none') group.classList.add(`field-${s}`);
+    }
+  });
 });
 
 // ── AI Advisor ──────────────────────────────────────────────
@@ -466,7 +605,7 @@ async function submitAIQuery() {
   responseCard.style.display = 'none';
 
   try {
-    const res = await fetch('/api/consult', {
+    const res = await apiFetch('/api/consult', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query, mode: currentMode }),
@@ -498,7 +637,7 @@ let historyEntriesMap = {};
 async function loadHistory() {
   const days = parseInt(document.getElementById('history-days').value);
   try {
-    const res = await fetch(`/api/history?days=${days}`);
+    const res = await apiFetch(`/api/history?days=${days}`);
     const { entries } = await res.json();
     renderHistoryTable(entries.slice().reverse()); // newest first for display
   } catch (e) {
@@ -521,7 +660,7 @@ function renderHistoryTable(entries) {
     const cells = PARAMS.map(p => {
       const v = e[p.key];
       const cls = getCellClass(p, v);
-      const display = v !== null && v !== undefined ? fmt(v, p.key === 'temperature' ? 1 : 2) : '—';
+      const display = v !== null && v !== undefined ? fmt(v, p.key === 'ph' ? 1 : 0) : '—';
       return `<td class="${cls}">${display}</td>`;
     });
 
@@ -571,23 +710,24 @@ async function saveEdit() {
   btn.disabled = true;
   btn.textContent = 'Saving…';
 
+  const n = v => v.trim() === '' ? null : parseFloat(v);
   const payload = {
     date:             document.getElementById('edit-date').value,
-    ph:               parseFloat(document.getElementById('edit-ph').value) || null,
-    ammonia:          parseFloat(document.getElementById('edit-ammonia').value) || null,
-    nitrite:          parseFloat(document.getElementById('edit-nitrite').value) || null,
-    nitrate:          parseFloat(document.getElementById('edit-nitrate').value) || null,
-    dissolved_oxygen: parseFloat(document.getElementById('edit-dissolved-oxygen').value) || null,
-    temperature:      parseFloat(document.getElementById('edit-temperature').value) || null,
-    potassium:        parseFloat(document.getElementById('edit-potassium').value) || null,
-    calcium:          parseFloat(document.getElementById('edit-calcium').value) || null,
-    magnesium:        parseFloat(document.getElementById('edit-magnesium').value) || null,
-    iron:             parseFloat(document.getElementById('edit-iron').value) || null,
+    ph:               n(document.getElementById('edit-ph').value),
+    ammonia:          n(document.getElementById('edit-ammonia').value),
+    nitrite:          n(document.getElementById('edit-nitrite').value),
+    nitrate:          n(document.getElementById('edit-nitrate').value),
+    dissolved_oxygen: n(document.getElementById('edit-dissolved-oxygen').value),
+    temperature:      n(document.getElementById('edit-temperature').value),
+    potassium:        n(document.getElementById('edit-potassium').value),
+    calcium:          n(document.getElementById('edit-calcium').value),
+    magnesium:        n(document.getElementById('edit-magnesium').value),
+    iron:             n(document.getElementById('edit-iron').value),
     plant_notes:      document.getElementById('edit-plant-notes').value.trim() || null,
   };
 
   try {
-    const res = await fetch(`/api/entry/${id}`, {
+    const res = await apiFetch(`/api/entry/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -618,7 +758,7 @@ function showConfirm(message, onConfirm) {
 async function deleteEntry(id) {
   showConfirm('Delete this entry? This cannot be undone.', async () => {
     try {
-      const res = await fetch(`/api/entry/${id}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/entry/${id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error(await res.text());
       loadHistory();
     } catch (err) {
@@ -738,7 +878,7 @@ async function saveLearning() {
   btn.textContent = 'Saving…';
 
   try {
-    const res = await fetch('/api/learnings', {
+    const res = await apiFetch('/api/learnings', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ title, content }),
@@ -756,7 +896,7 @@ async function saveLearning() {
 
 async function loadLearnings() {
   try {
-    const res = await fetch('/api/learnings');
+    const res = await apiFetch('/api/learnings');
     const { learnings } = await res.json();
     renderLearnings(learnings);
   } catch (e) {
@@ -822,7 +962,7 @@ async function saveLearningEdit(id) {
   if (!content) return;
 
   try {
-    const res = await fetch(`/api/learnings/${id}`, {
+    const res = await apiFetch(`/api/learnings/${id}`, {
       method:  'PUT',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ title, content }),
@@ -837,7 +977,7 @@ async function saveLearningEdit(id) {
 async function deleteLearning(id) {
   showConfirm('Delete this learning? This cannot be undone.', async () => {
     try {
-      const res = await fetch(`/api/learnings/${id}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/learnings/${id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error(await res.text());
       loadLearnings();
     } catch (err) {
@@ -846,9 +986,297 @@ async function deleteLearning(id) {
   });
 }
 
-// ── Init ────────────────────────────────────────────────────
-function init() {
-  loadDashboard();
+// ── Settings ────────────────────────────────────────────────
+async function loadSettings() {
+  try {
+    const res = await apiFetch('/api/settings');
+    const { settings } = await res.json();
+    try {
+      appSettings.visible_params = JSON.parse(settings.visible_params);
+    } catch {
+      appSettings.visible_params = null;
+    }
+    applyParamVisibility();
+  } catch (e) {
+    console.error('Settings load error:', e);
+  }
 }
 
-init();
+async function saveParamSetting(key, enabled) {
+  const vp = appSettings.visible_params || PARAMS.map(p => p.key);
+  const updated = enabled ? [...new Set([...vp, key])] : vp.filter(k => k !== key);
+  appSettings.visible_params = updated;
+  applyParamVisibility();
+  renderParamCards(null); // re-render cards (dashboard will reload if active)
+  if (currentTab === 'dashboard') loadDashboard();
+  await apiFetch('/api/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ settings: { visible_params: JSON.stringify(updated) } }),
+  });
+}
+
+// ── Supplements ─────────────────────────────────────────────
+
+function suppPlainName(key) {
+  return key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+function suppStripPrefix(name, key) {
+  const prefix = suppPlainName(key).toLowerCase() + ' ';
+  return name.toLowerCase().startsWith(prefix) ? name.slice(suppPlainName(key).length + 1) : name;
+}
+
+async function loadAllSupplementTypes() {
+  const typeSelect = document.getElementById('supp-type');
+  typeSelect.innerHTML = '<option value="">Loading…</option>';
+  try {
+    const res = await apiFetch('/api/supplement-types');
+    if (!res || !res.ok) {
+      typeSelect.innerHTML = '<option value="">Error loading supplements</option>';
+      return;
+    }
+    const { types } = await res.json();
+    if (!types || !types.length) {
+      typeSelect.innerHTML = '<option value="">No supplements available</option>';
+      return;
+    }
+    const groups = {};
+    Object.keys(NUTRIENT_LABELS).forEach(k => { groups[k] = []; });
+    types.forEach(t => { if (groups[t.nutrient_key]) groups[t.nutrient_key].push(t); });
+
+    let html = '<option value="">Select supplement…</option>';
+    Object.entries(NUTRIENT_LABELS).forEach(([key, label]) => {
+      if (!groups[key] || !groups[key].length) return;
+      html += `<optgroup label="${label}">`;
+      groups[key].forEach(t => {
+        html += `<option value="${t.id}" data-nutrient="${key}">${suppStripPrefix(t.name, key)}</option>`;
+      });
+      html += '</optgroup>';
+    });
+    typeSelect.innerHTML = html;
+  } catch (e) {
+    console.error('loadAllSupplementTypes error:', e);
+    typeSelect.innerHTML = '<option value="">Error loading supplements</option>';
+  }
+}
+
+document.getElementById('supp-type').addEventListener('change', function () {
+  const opt = this.selectedOptions[0];
+  const nutrientKey = opt ? opt.dataset.nutrient : '';
+  const unitSelect  = document.getElementById('supp-unit');
+  const amountInput = document.getElementById('supp-amount');
+  if (nutrientKey === 'water_change') {
+    unitSelect.value = '%';
+    amountInput.placeholder = '0 – 100';
+    amountInput.max = '100';
+  } else {
+    if (unitSelect.value === '%') unitSelect.value = 'g';
+    amountInput.placeholder = '0.0';
+    amountInput.removeAttribute('max');
+  }
+});
+
+async function submitSupplement() {
+  const status = document.getElementById('supp-status');
+  const date   = document.getElementById('supp-date').value;
+  const typeId = parseInt(document.getElementById('supp-type').value);
+  const amount = parseFloat(document.getElementById('supp-amount').value);
+
+  status.style.color = 'var(--red-600)';
+  if (!date) { status.textContent = 'Date is required.'; return; }
+  if (!typeId) { status.textContent = 'Select a supplement type.'; document.getElementById('supp-type').focus(); return; }
+  if (isNaN(amount) || amount <= 0) { status.textContent = 'Enter an amount greater than 0.'; document.getElementById('supp-amount').focus(); return; }
+
+  status.textContent = 'Saving…';
+  status.style.color = 'var(--slate-500)';
+
+  try {
+    const res = await apiFetch('/api/supplements', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        date,
+        supplement_type_id: typeId,
+        amount,
+        unit: document.getElementById('supp-unit').value,
+        notes: document.getElementById('supp-notes').value.trim() || null,
+      }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+
+    status.textContent = '✓ Logged';
+    status.style.color = 'var(--green-600)';
+    document.getElementById('supp-type').value = '';
+    document.getElementById('supp-amount').value = '';
+    document.getElementById('supp-notes').value = '';
+    setTimeout(() => { status.textContent = ''; }, 2500);
+    loadSupplementLog();
+    document.getElementById('supp-type').focus();
+  } catch (err) {
+    status.textContent = '✗ Error: ' + err.message;
+    status.style.color = 'var(--red-600)';
+  }
+}
+
+async function loadSupplementLog() {
+  const container = document.getElementById('supplement-log-list');
+  try {
+    const res = await apiFetch('/api/supplements?days=30');
+    const { entries } = await res.json();
+    if (!entries.length) {
+      container.innerHTML = '<p class="empty-hint">No supplements logged in the last 30 days.</p>';
+      return;
+    }
+    container.innerHTML = `
+      <h3 class="form-section-title">Recent Additions (last 30 days)</h3>
+      <div class="supp-log-table">
+        <div class="supp-log-header">
+          <span>Date</span><span>Nutrient</span><span>Type</span><span>Amount</span><span></span>
+        </div>
+        ${entries.map(e => `
+          <div class="supp-log-row">
+            <span>${e.date}</span>
+            <span>${NUTRIENT_LABELS[e.nutrient_key] || e.nutrient_key || '—'}</span>
+            <span>${e.type_name || '—'}</span>
+            <span>${e.amount} ${e.unit}</span>
+            <span>
+              <button class="btn-icon btn-delete" onclick="deleteSupplementEntry(${e.id})" title="Delete">🗑️</button>
+            </span>
+          </div>
+          ${e.notes ? `<div class="supp-log-notes">${e.notes}</div>` : ''}
+        `).join('')}
+      </div>`;
+  } catch (err) {
+    container.innerHTML = '<p class="empty-hint">Error loading log.</p>';
+  }
+}
+
+async function deleteSupplementEntry(id) {
+  showConfirm('Delete this supplement entry?', async () => {
+    try {
+      const res = await apiFetch(`/api/supplements/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(await res.text());
+      loadSupplementLog();
+    } catch (err) {
+      alert('Error: ' + err.message);
+    }
+  });
+}
+
+// ── Admin panel ─────────────────────────────────────────────
+async function loadAdminPanel() {
+  renderAdminParams();
+  await loadAdminSupplementTypes();
+}
+
+function renderAdminParams() {
+  const list = document.getElementById('admin-params-list');
+  const vp = appSettings.visible_params || PARAMS.map(p => p.key);
+  list.innerHTML = PARAMS.map(p => `
+    <div class="admin-toggle-row">
+      <span class="admin-toggle-label">${p.label}${p.unit ? ` <small class="admin-unit">${p.unit}</small>` : ''}</span>
+      <label class="toggle-switch">
+        <input type="checkbox" ${vp.includes(p.key) ? 'checked' : ''}
+               onchange="saveParamSetting('${p.key}', this.checked)">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+  `).join('');
+}
+
+async function loadAdminSupplementTypes() {
+  const container = document.getElementById('admin-supplement-types');
+  try {
+    const res = await apiFetch('/api/supplement-types?include_disabled=true');
+    const { types } = await res.json();
+
+    const groups = {};
+    Object.keys(NUTRIENT_LABELS).forEach(k => { groups[k] = []; });
+    types.forEach(t => { if (groups[t.nutrient_key]) groups[t.nutrient_key].push(t); });
+
+    container.innerHTML = Object.entries(NUTRIENT_LABELS).map(([key, label]) => `
+      <div class="admin-nutrient-group">
+        <div class="admin-nutrient-header">
+          <span class="admin-nutrient-label">${label}</span>
+          <button class="btn btn-secondary btn-sm" onclick="showAddTypeForm('${key}')">+ Add</button>
+        </div>
+        <div id="add-type-form-${key}" class="add-type-form" style="display:none">
+          <input type="text" id="new-type-name-${key}" placeholder="Type name…" class="add-type-input" />
+          <button class="btn btn-primary btn-sm" onclick="addSupplementType('${key}')">Save</button>
+          <button class="btn btn-secondary btn-sm" onclick="hideAddTypeForm('${key}')">Cancel</button>
+        </div>
+        ${groups[key].length ? groups[key].map(t => `
+          <div class="admin-type-row">
+            <span class="admin-type-name ${t.enabled ? '' : 'admin-type-disabled'}">${t.name}</span>
+            <div class="admin-type-actions">
+              <label class="toggle-switch toggle-sm">
+                <input type="checkbox" ${t.enabled ? 'checked' : ''}
+                       onchange="toggleSupplementType(${t.id}, this.checked)">
+                <span class="toggle-slider"></span>
+              </label>
+              <button class="btn-icon btn-delete" onclick="deleteAdminSupplementType(${t.id})">🗑️</button>
+            </div>
+          </div>
+        `).join('') : '<p class="empty-hint" style="padding:.5rem 0 0">No types yet.</p>'}
+      </div>
+    `).join('');
+  } catch (err) {
+    container.innerHTML = '<p class="empty-hint">Error loading supplement types.</p>';
+  }
+}
+
+function showAddTypeForm(key) {
+  document.getElementById(`add-type-form-${key}`).style.display = 'flex';
+  document.getElementById(`new-type-name-${key}`).focus();
+}
+function hideAddTypeForm(key) {
+  document.getElementById(`add-type-form-${key}`).style.display = 'none';
+  document.getElementById(`new-type-name-${key}`).value = '';
+}
+
+async function addSupplementType(nutrientKey) {
+  const input = document.getElementById(`new-type-name-${nutrientKey}`);
+  const name = input.value.trim();
+  if (!name) return;
+  try {
+    const res = await apiFetch('/api/supplement-types', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nutrient_key: nutrientKey, name }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    await loadAdminSupplementTypes();
+  } catch (err) {
+    alert('Error: ' + err.message);
+  }
+}
+
+async function toggleSupplementType(id, enabled) {
+  await fetch(`/api/supplement-types/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+async function deleteAdminSupplementType(id) {
+  showConfirm('Delete this supplement type? Existing log entries will keep the name.', async () => {
+    try {
+      const res = await apiFetch(`/api/supplement-types/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(await res.text());
+      loadAdminSupplementTypes();
+    } catch (err) {
+      alert('Error: ' + err.message);
+    }
+  });
+}
+
+// ── Init ────────────────────────────────────────────────────
+async function init() {
+  await loadSettings();
+  loadDashboard();
+  loadAllSupplementTypes();
+}
+
+// Entry point — check auth before showing app
+checkAuthAndLoad();

@@ -4,11 +4,70 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Aquaponics Tracker</title>
-  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 22'><path fill='%2322c55e' d='M9 0C4.5 2.5 1 8.5 1 14a8 8 0 0 0 16 0C17 8.5 13.5 2.5 9 0z'/><line x1='9' y1='7' x2='9' y2='21' stroke='white' stroke-width='1.5' stroke-linecap='round'/></svg>" />
+  <link rel="stylesheet" href="/static/styles.css?v=10" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
 </head>
 <body>
+
+  <!-- ===== LOGIN SCREEN ===== -->
+  <div id="login-screen" class="login-screen">
+
+    <!-- Brand panel -->
+    <div class="login-brand-panel">
+      <div class="login-brand-content">
+        <div class="login-brand-mark">
+          <svg width="48" height="58" viewBox="0 0 18 22" fill="white" aria-hidden="true">
+            <path d="M9 0C4.5 2.5 1 8.5 1 14a8 8 0 0 0 16 0C17 8.5 13.5 2.5 9 0z"/>
+            <line x1="9" y1="7" x2="9" y2="21" stroke="rgba(255,255,255,.5)" stroke-width="1.2" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <h1 class="login-brand-name">Aquaponics Tracker</h1>
+      </div>
+
+      <!-- Decorative floating circles -->
+      <div class="login-deco-circle login-deco-1"></div>
+      <div class="login-deco-circle login-deco-2"></div>
+      <div class="login-deco-circle login-deco-3"></div>
+    </div>
+
+    <!-- Form panel -->
+    <div class="login-form-panel">
+      <div class="login-form-inner">
+        <h2 class="login-heading">Welcome back</h2>
+        <p class="login-subheading">Sign in to your dashboard</p>
+
+        <div class="login-field">
+          <label class="login-label" for="login-email">Email address</label>
+          <input class="login-input" type="email" id="login-email"
+                 placeholder="you@example.com" autocomplete="email"
+                 onkeydown="if(event.key==='Enter') document.getElementById('login-password').focus()" />
+        </div>
+
+        <div class="login-field">
+          <label class="login-label" for="login-password">Password</label>
+          <input class="login-input" type="password" id="login-password"
+                 placeholder="••••••••" autocomplete="current-password"
+                 onkeydown="if(event.key==='Enter') submitLogin()" />
+        </div>
+
+        <p id="login-error" class="login-error" style="display:none"></p>
+
+        <button class="login-submit-btn" id="login-btn" onclick="submitLogin()">
+          Sign in
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ===== APP (hidden until authenticated) ===== -->
+  <div id="app-shell" style="display:none">
+
   <!-- Header -->
   <header class="app-header">
     <div class="header-inner">
@@ -23,6 +82,7 @@
         <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
         <button class="tab-btn" data-tab="history">History</button>
         <button class="tab-btn" data-tab="learnings">Learnings</button>
+        <button class="tab-btn" data-tab="admin">⚙ Admin</button>
       </nav>
       <button class="btn btn-primary nav-log-btn" onclick="switchTab('track')">+ Log Data</button>
     </div>
@@ -121,80 +181,104 @@
     <!-- ===== TRACK TAB ===== -->
     <section class="tab-panel" id="tab-track">
       <div class="section-header">
-        <h2>Log Daily Readings</h2>
+        <h2>Log Data</h2>
       </div>
 
+      <div class="sub-tab-nav track-sub-nav">
+        <button class="track-sub-tab-btn active" data-tracktab="readings">Readings</button>
+        <button class="track-sub-tab-btn" data-tracktab="supplements">Supplements</button>
+      </div>
+
+      <!-- ── Readings sub-tab ── -->
+      <div class="track-sub-tab-panel" id="tracktab-readings">
+
       <form id="track-form" class="track-form">
-        <div class="form-date-row">
-          <label for="entry-date">Date</label>
-          <input type="date" id="entry-date" name="date" required />
-        </div>
 
         <h3 class="form-section-title">Water Parameters</h3>
         <div class="form-grid">
-          <div class="form-group">
+          <div class="form-group" data-param="ph">
             <label for="f-ph">pH</label>
-            <input type="number" id="f-ph" name="ph" step="0.01" min="0" max="14"
-                   placeholder="6.8 – 7.4" />
-            <span class="form-unit">—</span>
+            <div class="input-with-unit">
+              <input type="number" id="f-ph" name="ph" step="0.01" min="0" max="14"
+                     placeholder="6.8 – 7.4" />
+              <span class="form-unit">—</span>
+            </div>
           </div>
-          <div class="form-group">
+          <div class="form-group" data-param="ammonia">
             <label for="f-ammonia">Ammonia</label>
-            <input type="number" id="f-ammonia" name="ammonia" step="0.01" min="0"
-                   placeholder="0 – 0.5" />
-            <span class="form-unit">ppm</span>
+            <div class="input-with-unit">
+              <input type="number" id="f-ammonia" name="ammonia" step="0.01" min="0"
+                     placeholder="0 – 0.5" />
+              <span class="form-unit">ppm</span>
+            </div>
           </div>
-          <div class="form-group">
+          <div class="form-group" data-param="nitrite">
             <label for="f-nitrite">Nitrite (NO₂)</label>
-            <input type="number" id="f-nitrite" name="nitrite" step="0.01" min="0"
-                   placeholder="0 – 0.5" />
-            <span class="form-unit">ppm</span>
+            <div class="input-with-unit">
+              <input type="number" id="f-nitrite" name="nitrite" step="0.01" min="0"
+                     placeholder="0 – 0.5" />
+              <span class="form-unit">ppm</span>
+            </div>
           </div>
-          <div class="form-group">
+          <div class="form-group" data-param="nitrate">
             <label for="f-nitrate">Nitrate (NO₃)</label>
-            <input type="number" id="f-nitrate" name="nitrate" step="1" min="0"
-                   placeholder="20 – 100" />
-            <span class="form-unit">ppm</span>
+            <div class="input-with-unit">
+              <input type="number" id="f-nitrate" name="nitrate" step="1" min="0"
+                     placeholder="20 – 100" />
+              <span class="form-unit">ppm</span>
+            </div>
           </div>
-          <div class="form-group">
+          <div class="form-group" data-param="dissolved_oxygen">
             <label for="f-do">Dissolved Oxygen</label>
-            <input type="number" id="f-do" name="dissolved_oxygen" step="0.1" min="0"
-                   placeholder="6 – 8" />
-            <span class="form-unit">ppm</span>
+            <div class="input-with-unit">
+              <input type="number" id="f-do" name="dissolved_oxygen" step="0.1" min="0"
+                     placeholder="6 – 8" />
+              <span class="form-unit">ppm</span>
+            </div>
           </div>
-          <div class="form-group">
+          <div class="form-group" data-param="temperature">
             <label for="f-temp">Temperature</label>
-            <input type="number" id="f-temp" name="temperature" step="0.1" min="0"
-                   placeholder="22 – 28" />
-            <span class="form-unit">°C</span>
+            <div class="input-with-unit">
+              <input type="number" id="f-temp" name="temperature" step="0.1" min="0"
+                     placeholder="22 – 28" />
+              <span class="form-unit">°C</span>
+            </div>
           </div>
         </div>
 
         <h3 class="form-section-title">Nutrients</h3>
         <div class="form-grid">
-          <div class="form-group">
+          <div class="form-group" data-param="iron">
             <label for="f-iron">Iron (Fe) chelated</label>
-            <input type="number" id="f-iron" name="iron" step="0.1" min="0"
-                   placeholder="2 – 4" />
-            <span class="form-unit">ppm</span>
+            <div class="input-with-unit">
+              <input type="number" id="f-iron" name="iron" step="0.1" min="0"
+                     placeholder="2 – 4" />
+              <span class="form-unit">ppm</span>
+            </div>
           </div>
-          <div class="form-group">
+          <div class="form-group" data-param="potassium">
             <label for="f-potassium">Potassium (K)</label>
-            <input type="number" id="f-potassium" name="potassium" step="0.1" min="0"
-                   placeholder="10 – 40" />
-            <span class="form-unit">ppm</span>
+            <div class="input-with-unit">
+              <input type="number" id="f-potassium" name="potassium" step="0.1" min="0"
+                     placeholder="10 – 40" />
+              <span class="form-unit">ppm</span>
+            </div>
           </div>
-          <div class="form-group">
+          <div class="form-group" data-param="calcium">
             <label for="f-calcium">Calcium (Ca)</label>
-            <input type="number" id="f-calcium" name="calcium" step="0.1" min="0"
-                   placeholder="40 – 80" />
-            <span class="form-unit">ppm</span>
+            <div class="input-with-unit">
+              <input type="number" id="f-calcium" name="calcium" step="0.1" min="0"
+                     placeholder="40 – 80" />
+              <span class="form-unit">ppm</span>
+            </div>
           </div>
-          <div class="form-group">
+          <div class="form-group" data-param="magnesium">
             <label for="f-magnesium">Magnesium (Mg)</label>
-            <input type="number" id="f-magnesium" name="magnesium" step="0.1" min="0"
-                   placeholder="10 – 30" />
-            <span class="form-unit">ppm</span>
+            <div class="input-with-unit">
+              <input type="number" id="f-magnesium" name="magnesium" step="0.1" min="0"
+                     placeholder="10 – 30" />
+              <span class="form-unit">ppm</span>
+            </div>
           </div>
         </div>
 
@@ -205,11 +289,64 @@
                     placeholder="Describe what you observe today: leaf color, any yellowing or spots, growth rate, fish behavior, anything unusual..."></textarea>
         </div>
 
+        <div class="form-date-row" style="margin-bottom:0">
+          <label for="entry-date">Date</label>
+          <input type="date" id="entry-date" name="date" required />
+        </div>
+
         <div class="form-actions">
           <button type="submit" class="btn btn-primary" id="save-btn">Save Entry</button>
           <span class="save-status" id="save-status"></span>
         </div>
       </form>
+
+      </div><!-- /tracktab-readings -->
+
+      <!-- ── Supplements sub-tab ── -->
+      <div class="track-sub-tab-panel" id="tracktab-supplements" style="display:none">
+        <div class="card">
+          <h3 class="form-section-title">Log Supplement Addition</h3>
+          <div class="form-grid supp-form-grid">
+            <div class="form-group" style="grid-column:1/-1">
+              <label for="supp-type">Supplement</label>
+              <select id="supp-type">
+                <option value="">Select supplement…</option>
+                <!-- populated by loadAllSupplementTypes() as optgroups -->
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="supp-amount">Amount</label>
+              <div class="supp-amount-unit">
+                <input type="number" id="supp-amount" step="0.1" min="0" placeholder="0.0" />
+                <div class="supp-unit-divider"></div>
+                <select id="supp-unit">
+                  <option value="g">g</option>
+                  <option value="ml">ml</option>
+                  <option value="tsp">tsp</option>
+                  <option value="tbsp">tbsp</option>
+                  <option value="%">%</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          <div class="form-group full-width" style="margin-top:.75rem">
+            <label for="supp-notes">Notes <span class="label-optional">(optional)</span></label>
+            <textarea id="supp-notes" rows="2" placeholder="e.g. Added to sump tank after water test"></textarea>
+          </div>
+          <div class="form-date-row" style="margin-top:.875rem; margin-bottom:0">
+            <label for="supp-date">Date</label>
+            <input type="date" id="supp-date" />
+          </div>
+          <div class="form-actions">
+            <button class="btn btn-primary" onclick="submitSupplement()">Log Addition</button>
+            <span class="save-status" id="supp-status"></span>
+          </div>
+        </div>
+
+        <!-- Recent supplement log -->
+        <div id="supplement-log-list" class="supp-log-list"></div>
+      </div><!-- /tracktab-supplements -->
+
     </section>
 
 
@@ -295,6 +432,32 @@
       </div>
     </section>
 
+
+    <!-- ===== ADMIN TAB ===== -->
+    <section class="tab-panel" id="tab-admin">
+      <div class="section-header">
+        <h2>Admin</h2>
+      </div>
+
+      <!-- Reading parameters -->
+      <div class="card">
+        <h3 class="admin-section-title">Reading Parameters</h3>
+        <p class="admin-section-desc">Control which parameters appear on the dashboard and in the log form.</p>
+        <div id="admin-params-list" class="admin-toggle-list">
+          <!-- populated by JS -->
+        </div>
+      </div>
+
+      <!-- Supplement types -->
+      <div class="card mt-4">
+        <h3 class="admin-section-title">Supplement Types</h3>
+        <p class="admin-section-desc">Manage which supplement types are available when logging additions. Toggle to show/hide, or add your own.</p>
+        <div id="admin-supplement-types">
+          <!-- populated by JS -->
+        </div>
+      </div>
+    </section>
+
   </main>
 
   <!-- Confirm Dialog -->
@@ -320,19 +483,19 @@
       </div>
       <h4 class="form-section-title">Water Parameters</h4>
       <div class="form-grid">
-        <div class="form-group"><label>pH</label><input type="number" id="edit-ph" step="0.01" min="0" max="14" placeholder="6.8 – 7.4" /><span class="form-unit">—</span></div>
-        <div class="form-group"><label>Ammonia</label><input type="number" id="edit-ammonia" step="0.01" min="0" placeholder="0 – 0.5" /><span class="form-unit">ppm</span></div>
-        <div class="form-group"><label>Nitrite (NO₂)</label><input type="number" id="edit-nitrite" step="0.01" min="0" placeholder="0 – 0.5" /><span class="form-unit">ppm</span></div>
-        <div class="form-group"><label>Nitrate (NO₃)</label><input type="number" id="edit-nitrate" step="1" min="0" placeholder="20 – 100" /><span class="form-unit">ppm</span></div>
-        <div class="form-group"><label>Dissolved Oxygen</label><input type="number" id="edit-dissolved-oxygen" step="0.1" min="0" placeholder="6 – 8" /><span class="form-unit">mg/L</span></div>
-        <div class="form-group"><label>Temperature</label><input type="number" id="edit-temperature" step="0.1" min="0" placeholder="22 – 28" /><span class="form-unit">°C</span></div>
+        <div class="form-group"><label>pH</label><div class="input-with-unit"><input type="number" id="edit-ph" step="0.01" min="0" max="14" placeholder="6.8 – 7.4" /><span class="form-unit">—</span></div></div>
+        <div class="form-group"><label>Ammonia</label><div class="input-with-unit"><input type="number" id="edit-ammonia" step="0.01" min="0" placeholder="0 – 0.5" /><span class="form-unit">ppm</span></div></div>
+        <div class="form-group"><label>Nitrite (NO₂)</label><div class="input-with-unit"><input type="number" id="edit-nitrite" step="0.01" min="0" placeholder="0 – 0.5" /><span class="form-unit">ppm</span></div></div>
+        <div class="form-group"><label>Nitrate (NO₃)</label><div class="input-with-unit"><input type="number" id="edit-nitrate" step="1" min="0" placeholder="20 – 100" /><span class="form-unit">ppm</span></div></div>
+        <div class="form-group"><label>Dissolved Oxygen</label><div class="input-with-unit"><input type="number" id="edit-dissolved-oxygen" step="0.1" min="0" placeholder="6 – 8" /><span class="form-unit">ppm</span></div></div>
+        <div class="form-group"><label>Temperature</label><div class="input-with-unit"><input type="number" id="edit-temperature" step="0.1" min="0" placeholder="22 – 28" /><span class="form-unit">°C</span></div></div>
       </div>
       <h4 class="form-section-title">Nutrients</h4>
       <div class="form-grid">
-        <div class="form-group"><label>Potassium (K)</label><input type="number" id="edit-potassium" step="0.1" min="0" placeholder="10 – 40" /><span class="form-unit">mg/L</span></div>
-        <div class="form-group"><label>Calcium (Ca)</label><input type="number" id="edit-calcium" step="0.1" min="0" placeholder="40 – 80" /><span class="form-unit">mg/L</span></div>
-        <div class="form-group"><label>Magnesium (Mg)</label><input type="number" id="edit-magnesium" step="0.1" min="0" placeholder="10 – 30" /><span class="form-unit">mg/L</span></div>
-        <div class="form-group"><label>Iron (Fe) chelated</label><input type="number" id="edit-iron" step="0.1" min="0" placeholder="2 – 4" /><span class="form-unit">mg/L</span></div>
+        <div class="form-group"><label>Potassium (K)</label><div class="input-with-unit"><input type="number" id="edit-potassium" step="0.1" min="0" placeholder="10 – 40" /><span class="form-unit">ppm</span></div></div>
+        <div class="form-group"><label>Calcium (Ca)</label><div class="input-with-unit"><input type="number" id="edit-calcium" step="0.1" min="0" placeholder="40 – 80" /><span class="form-unit">ppm</span></div></div>
+        <div class="form-group"><label>Magnesium (Mg)</label><div class="input-with-unit"><input type="number" id="edit-magnesium" step="0.1" min="0" placeholder="10 – 30" /><span class="form-unit">ppm</span></div></div>
+        <div class="form-group"><label>Iron (Fe) chelated</label><div class="input-with-unit"><input type="number" id="edit-iron" step="0.1" min="0" placeholder="2 – 4" /><span class="form-unit">ppm</span></div></div>
       </div>
       <h4 class="form-section-title">Plant Observations</h4>
       <div class="form-group">
@@ -347,6 +510,8 @@
     </div>
   </dialog>
 
-  <script src="/static/app.js"></script>
+  </div><!-- /app-shell -->
+
+  <script src="/static/app.js?v=10"></script>
 </body>
 </html>
