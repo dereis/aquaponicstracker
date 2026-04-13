@@ -1633,8 +1633,7 @@ class ContactRow(BaseModel):
 
 
 @app.get("/api/contacts")
-async def get_contacts(request: Request):
-    require_auth(request)
+async def get_contacts():
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT COUNT(*) AS n FROM contacts")
@@ -1648,8 +1647,7 @@ async def get_contacts(request: Request):
 
 
 @app.post("/api/contacts")
-async def create_contact(req: ContactRow, request: Request):
-    require_auth(request)
+async def create_contact(req: ContactRow):
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -1666,8 +1664,7 @@ async def create_contact(req: ContactRow, request: Request):
 
 
 @app.put("/api/contacts/{contact_id}")
-async def update_contact(contact_id: int, req: ContactRow, request: Request):
-    require_auth(request)
+async def update_contact(contact_id: int, req: ContactRow):
     fields = {k: v for k, v in req.dict().items()
               if k in _CONTACT_FIELDS and v is not None}
     if not fields:
@@ -1683,8 +1680,7 @@ async def update_contact(contact_id: int, req: ContactRow, request: Request):
 
 
 @app.delete("/api/contacts/{contact_id}")
-async def delete_contact(contact_id: int, request: Request):
-    require_auth(request)
+async def delete_contact(contact_id: int):
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM contacts WHERE id = %s", (contact_id,))
